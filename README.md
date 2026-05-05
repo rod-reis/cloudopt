@@ -135,15 +135,23 @@ five umbrella categories:
 
 ## Installation
 
+**From GitHub** (Azure Cloud Shell or any internet-connected machine):
 ```bash
-pip install -e .
+pip install git+https://github.com/Azure/cloudopt.git
 ```
 
-For development (tests + coverage):
-
+**From a zip file** (offline / air-gapped delivery):
 ```bash
-pip install -e ".[dev]"
+unzip cloudopt.zip && cd cloudopt && pip install .
 ```
+
+**From a local clone** (contributors):
+```bash
+git clone https://github.com/Azure/cloudopt.git
+cd cloudopt && pip install -e ".[dev]"
+```
+
+Verify: `cloudopt version`
 
 ---
 
@@ -285,8 +293,12 @@ pytest tests/test_metrics.py             # single file
 
 ## Documentation
 
-- [HOW_TO.md](HOW_TO.md) — Collector guide (scope, filters, thresholds, output)
-- [ANALYZER.md](ANALYZER.md) — Analyzer guide (Excel generation, dashboard, export)
+| Guide                        | Purpose                                                                        |
+| ---------------------------- | ------------------------------------------------------------------------------ |
+| [HOW_TO.md](HOW_TO.md)       | Installation, authentication, quick start, command overview                    |
+| [COLLECTOR.md](COLLECTOR.md) | Full `collect` reference — options, scope files, thresholds, what is collected |
+| [ANALYZER.md](ANALYZER.md)   | Excel generation, dashboard, export, workbook structure, CSA fields            |
+| [REPORTER.md](REPORTER.md)   | Final report generation from the analyzed workbook *(coming soon)*             |
 
 ---
 
