@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Azure CLOUDOPT Collector</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --blue:    #1F4E79;
+      --blue-lt: #2E75B6;
+      --green:   #375623;
+      --yellow:  #7D6608;
+      --red:     #9C0006;
+      --bg:      #F3F6FA;
+      --card:    #FFFFFF;
+      --border:  #D0DCE8;
+      --text:    #1A2433;
+      --muted:   #637390;
+      --csa:     #BDD7EE;
+    }
+
+    body { font-family: "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--text); font-size: 14px; }
+
+    /* Layout */
+    #app { display: flex; height: 100vh; }
+    nav  { width: 200px; min-width: 200px; background: var(--blue); display: flex; flex-direction: column; padding: 16px 0; }
+    main { flex: 1; overflow-y: auto; padding: 24px; }
+
+    /* Nav */
+    .nav-logo { color: #fff; font-weight: 700; font-size: 13px; padding: 0 16px 20px; border-bottom: 1px solid rgba(255,255,255,.15); }
+    .nav-logo span { font-size: 11px; font-weight: 400; opacity: .7; display: block; margin-top: 2px; }
+    nav a { display: block; color: rgba(255,255,255,.8); text-decoration: none; padding: 9px 16px; font-size: 13px; border-left: 3px solid transparent; transition: background .15s; }
+    nav a:hover, nav a.active { background: rgba(255,255,255,.12); border-left-color: #fff; color: #fff; }
+    .nav-section { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: rgba(255,255,255,.4); padding: 16px 16px 4px; }
+
+    /* Toolbar */
+    .toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
+    .toolbar h1 { font-size: 20px; font-weight: 600; flex: 1; }
+    button.reload { background: var(--blue-lt); color: #fff; border: none; border-radius: 6px; padding: 7px 14px; cursor: pointer; font-size: 13px; }
+    button.reload:hover { background: var(--blue); }
+
+    /* Cards */
+    .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; margin-bottom: 24px; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 16px 18px; }
+    .card-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+    .card-value { font-size: 28px; font-weight: 700; margin-top: 4px; }
+    .card-value.green { color: #197A3A; }
+    .card-value.yellow { color: #C08B00; }
+    .card-value.red { color: #C00000; }
+
+    /* Filter bar */
+    .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+    .filters input, .filters select { border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 13px; background: var(--card); }
+    .filters input:focus, .filters select:focus { outline: 2px solid var(--blue-lt); }
+
+    /* Tables */
+    .table-wrap { overflow-x: auto; border-radius: 8px; border: 1px solid var(--border); }
+    table { border-collapse: collapse; width: 100%; background: var(--card); font-size: 12.5px; }
+    th { background: var(--blue); color: #fff; padding: 9px 12px; text-align: left; font-weight: 600; white-space: nowrap; cursor: pointer; user-select: none; }
+    th:hover { background: var(--blue-lt); }
+    td { padding: 8px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+    tr:hover td { background: #EEF4FB; }
+    tr.csa-row td { background: #F0F8FF; }
+
+    /* Pills */
+    .pill { display: inline-block; border-radius: 12px; padding: 2px 9px; font-size: 11px; font-weight: 600; }
+    .pill-green  { background: #C6EFCE; color: var(--green); }
+    .pill-yellow { background: #FFEB9C; color: var(--yellow); }
+    .pill-red    { background: #FFC7CE; color: var(--red); }
+    .pill-blue   { background: #BDD7EE; color: var(--blue); }
+    .pill-gray   { background: #E2E8F0; color: #475569; }
+
+    /* Chart */
+    .chart-card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-bottom: 20px; }
+    .chart-title { font-size: 14px; font-weight: 600; margin-bottom: 16px; }
+
+    /* Loading / empty */
+    .empty { padding: 40px; text-align: center; color: var(--muted); }
+    .loading { opacity: .5; pointer-events: none; }
+
+    /* Section */
+    section { display: none; }
+    section.active { display: block; }
+
+    /* Metadata table */
+    .meta-table { border-collapse: collapse; width: 100%; max-width: 600px; }
+    .meta-table td { padding: 6px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
+    .meta-table td:first-child { font-weight: 600; width: 240px; color: var(--muted); }
+  </style>
+</head>
+<body>
+<div id="app">
+  <nav>
+    <div class="nav-logo">Azure Capacity<span>Collector</span></div>
+    <div class="nav-section">Overview</div>
+    <a href="#" data-section="dashboard" class="active">Dashboard</a>
+    <a href="#" data-section="subscriptions">Subscriptions</a>
+    <a href="#" data-section="resource-groups">Resource Groups</a>
+    <a href="#" data-section="groups">VM Groups</a>
+    <div class="nav-section">Detail</div>
+    <a href="#" data-section="inventory">VM Inventory</a>
+    <a href="#" data-section="recommendations">Recommendations</a>
+    <a href="#" data-section="quota">Quota Utilisation</a>
+    <div class="nav-section">Info</div>
+    <a href="#" data-section="metadata">Collection Info</a>
+  </nav>
+
+  <main id="main-content">
+
+    <!-- DASHBOARD -->
+    <section id="dashboard" class="active">
+      <div class="toolbar"><h1>Dashboard</h1><button class="reload" onclick="reloadData()">↺ Reload Data</button></div>
+      <div class="cards" id="summary-cards"></div>
+      <div class="chart-card">
+        <div class="chart-title">CPU Utilisation by Subscription</div>
+        <canvas id="sub-chart" height="80"></canvas>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">Recommendation Categories</div>
+        <canvas id="rec-chart" height="80"></canvas>
+      </div>
+    </section>
+
+    <!-- SUBSCRIPTIONS -->
+    <section id="subscriptions">
+      <div class="toolbar"><h1>Subscriptions</h1></div>
+      <div class="table-wrap"><table id="subs-table">
+        <thead><tr><th>Subscription</th><th>VM SKU</th><th onclick="sortTable('subs-table',2)">VM Count ↕</th><th onclick="sortTable('subs-table',3)">Avg CPU % ↕</th><th onclick="sortTable('subs-table',4)">Avg Mem % ↕</th></tr></thead>
+        <tbody id="subs-body"></tbody>
+      </table></div>
+    </section>
+
+    <!-- RESOURCE GROUPS -->
+    <section id="resource-groups">
+      <div class="toolbar"><h1>Resource Groups</h1></div>
+      <div class="table-wrap"><table id="rg-table">
+        <thead><tr><th>Subscription</th><th>Resource Group</th><th>VM SKU</th><th onclick="sortTable('rg-table',3)">VM Count ↕</th><th onclick="sortTable('rg-table',4)">Avg CPU % ↕</th><th onclick="sortTable('rg-table',5)">Avg Mem % ↕</th></tr></thead>
+        <tbody id="rg-body"></tbody>
+      </table></div>
+    </section>
+
+    <!-- VM GROUPS -->
+    <section id="groups">
+      <div class="toolbar"><h1>VM Groups</h1><small style="color:var(--muted)">VMSS, Availability Sets, and ungrouped VMs</small></div>
+      <div class="filters">
+        <select id="group-type-filter" onchange="renderGroups()">
+          <option value="">All group types</option>
+          <option value="VMSS">VMSS</option>
+          <option value="AvailabilitySet">Availability Set</option>
+          <option value="None">Ungrouped</option>
+        </select>
+      </div>
+      <div class="table-wrap"><table id="groups-table">
+        <thead><tr><th>Subscription</th><th>Resource Group</th><th>Group Name</th><th>Type</th><th>VM SKU</th><th onclick="sortTable('groups-table',5)">VM Count ↕</th><th onclick="sortTable('groups-table',6)">Avg CPU % ↕</th><th onclick="sortTable('groups-table',7)">Avg Mem % ↕</th></tr></thead>
+        <tbody id="groups-body"></tbody>
+      </table></div>
+    </section>
+
+    <!-- INVENTORY -->
+    <section id="inventory">
+      <div class="toolbar"><h1>VM Inventory</h1></div>
+      <div class="filters">
+        <input id="inv-search" placeholder="Search VM, RG, SKU…" oninput="renderInventory()" style="width:220px" />
+        <select id="inv-sub" onchange="renderInventory()"><option value="">All subscriptions</option></select>
+        <select id="inv-rg" onchange="renderInventory()"><option value="">All resource groups</option></select>
+        <select id="inv-sku" onchange="renderInventory()"><option value="">All SKUs</option></select>
+      </div>
+      <div class="table-wrap" style="max-height:65vh;overflow-y:auto">
+        <table id="inv-table">
+          <thead><tr>
+            <th>VM Name</th><th>Subscription</th><th>Resource Group</th>
+            <th>SKU</th><th>vCPUs</th><th>Mem (GB)</th>
+            <th>Region</th><th>OS</th><th>OS Version</th><th>Power</th>
+            <th>Image Publisher</th><th>Image Offer</th><th>Image SKU</th><th>Image Ver.</th>
+            <th>AZ</th>
+            <th>VMSS</th><th>AvSet</th>
+            <th class="csa-col" style="background:#2E75B6">Workload</th>
+            <th class="csa-col" style="background:#2E75B6">Application</th>
+            <th class="csa-col" style="background:#2E75B6">Environment</th>
+            <th class="csa-col" style="background:#2E75B6">Criticality</th>
+            <th class="csa-col" style="background:#2E75B6">Owner</th>
+          </tr></thead>
+          <tbody id="inv-body"></tbody>
+        </table>
+      </div>
+      <div id="inv-count" style="margin-top:8px;color:var(--muted);font-size:12px"></div>
+    </section>
+
+    <!-- RECOMMENDATIONS -->
+    <section id="recommendations">
+      <div class="toolbar"><h1>Recommendations</h1></div>
+      <div class="filters">
+        <select id="rec-cat" onchange="renderRecommendations()">
+          <option value="">All categories</option>
+          <option value="underutilized">Underutilized</option>
+          <option value="right-size">Right-size</option>
+          <option value="PaaS-candidate">PaaS Candidate</option>
+        </select>
+        <select id="rec-override" onchange="renderRecommendations()">
+          <option value="">All override status</option>
+          <option value="accept">Accepted</option>
+          <option value="reject">Rejected</option>
+          <option value="defer">Deferred</option>
+          <option value="">Pending</option>
+        </select>
+      </div>
+      <div class="table-wrap">
+        <table id="rec-table">
+          <thead><tr>
+            <th>Resource ID</th><th>Current SKU</th><th>Recommended SKU</th>
+            <th>Category</th><th>Recommended Action</th><th>Est. Savings</th><th>Override</th><th>Notes</th>
+          </tr></thead>
+          <tbody id="rec-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- METADATA -->
+    <section id="metadata">
+      <div class="toolbar"><h1>Collection Info</h1></div>
+      <div class="card" style="max-width:620px">
+        <table class="meta-table" id="meta-table"></table>
+      </div>
+    </section>
+
+    <!-- QUOTA -->
+    <section id="quota">
+      <div class="toolbar"><h1>Quota Utilisation</h1></div>
+      <div class="filters">
+        <label style="font-size:13px;display:flex;align-items:center;gap:6px">
+          <input type="checkbox" id="quota-alerts-only" onchange="renderQuota()" />
+          Alerts only
+        </label>
+      </div>
+      <div class="table-wrap">
+        <table id="quota-table">
+          <thead><tr>
+            <th>Subscription</th><th>Region</th><th>Resource Type</th><th>Display Name</th>
+            <th onclick="sortTable('quota-table',4)">Current ↕</th>
+            <th onclick="sortTable('quota-table',5)">Limit ↕</th>
+            <th onclick="sortTable('quota-table',6)">Utilization % ↕</th>
+            <th>Alert</th>
+          </tr></thead>
+          <tbody id="quota-body"></tbody>
+        </table>
+      </div>
+      <div id="quota-count" style="margin-top:8px;color:var(--muted);font-size:12px"></div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+let vms = [], recs = [], subSummary = [], rgSummary = [], groupSummary = [], quota = [], meta = {};
+let subChart, recChart;
+
+// ---------------------------------------------------------------------------
+// Bootstrap
+// ---------------------------------------------------------------------------
+document.addEventListener('DOMContentLoaded', async () => {
+  setupNav();
+  await loadAll();
+});
+
+async function loadAll() {
+  [vms, recs, subSummary, rgSummary, groupSummary, quota, meta] = await Promise.all([
+    fetchJSON('/api/inventory'),
+    fetchJSON('/api/recommendations'),
+    fetchJSON('/api/summary/subscription'),
+    fetchJSON('/api/summary/resource-group'),
+    fetchJSON('/api/summary/groups'),
+    fetchJSON('/api/quota'),
+    fetchJSON('/api/metadata'),
+  ]);
+  populateFilters();
+  renderAll();
+}
+
+async function reloadData() {
+  await fetchJSON('/api/reload', 'POST');
+  await loadAll();
+}
+
+// ---------------------------------------------------------------------------
+// Navigation
+// ---------------------------------------------------------------------------
+function setupNav() {
+  document.querySelectorAll('nav a').forEach(a => {
+    a.addEventListener('click', e => {
+      e.preventDefault();
+      const id = a.dataset.section;
+      document.querySelectorAll('nav a').forEach(x => x.classList.remove('active'));
+      document.querySelectorAll('section').forEach(x => x.classList.remove('active'));
+      a.classList.add('active');
+      document.getElementById(id).classList.add('active');
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Render all
+// ---------------------------------------------------------------------------
+function renderAll() {
+  renderDashboard();
+  renderSubscriptions();
+  renderResourceGroups();
+  renderGroups();
+  renderInventory();
+  renderRecommendations();
+  renderQuota();
+  renderMetadata();
+}
+
+// ---------------------------------------------------------------------------
+// Dashboard
+// ---------------------------------------------------------------------------
+function renderDashboard() {
+  const totalVMs = vms.length;
+  const underutil = recs.filter(r => r.category === 'underutilized').length;
+  const rightsize  = recs.filter(r => r.category === 'right-size').length;
+  const paas       = recs.filter(r => r.category === 'PaaS-candidate').length;
+  const quotaAlerts = quota.filter(q => q.alert).length;
+
+  const cards = document.getElementById('summary-cards');
+  cards.innerHTML = `
+    ${card('Total VMs', totalVMs, '')}
+    ${card('Underutilized', underutil, underutil > 0 ? 'yellow' : 'green')}
+    ${card('Right-size', rightsize, rightsize > 0 ? 'yellow' : 'green')}
+    ${card('PaaS Candidates', paas, paas > 0 ? 'blue' : '')}
+    ${card('Quota Alerts', quotaAlerts, quotaAlerts > 0 ? 'red' : 'green')}
+  `;
+
+  // Subscription CPU chart
+  const subLabels = subSummary.map(s => s.group_name);
+  const subCpuData = subSummary.map(s => s.avg_cpu_pct ?? 0);
+  const subCtx = document.getElementById('sub-chart');
+  if (subChart) subChart.destroy();
+  subChart = new Chart(subCtx, {
+    type: 'bar',
+    data: {
+      labels: subLabels,
+      datasets: [{
+        label: 'Avg CPU %',
+        data: subCpuData,
+        backgroundColor: subCpuData.map(v => v < 40 ? '#C6EFCE' : v < 70 ? '#FFEB9C' : '#FFC7CE'),
+        borderColor: subCpuData.map(v => v < 40 ? '#375623' : v < 70 ? '#7D6608' : '#9C0006'),
+        borderWidth: 1,
+      }]
+    },
+    options: { plugins: { legend: { display: false } }, scales: { y: { max: 100, title: { display: true, text: '% CPU' } } } }
+  });
+
+  // Rec category chart
+  const recCtx = document.getElementById('rec-chart');
+  if (recChart) recChart.destroy();
+  const cats = ['underutilized', 'right-size', 'PaaS-candidate'];
+  const catCounts = cats.map(c => recs.filter(r => r.category === c).length);
+  recChart = new Chart(recCtx, {
+    type: 'doughnut',
+    data: {
+      labels: ['Underutilized', 'Right-size', 'PaaS Candidate'],
+      datasets: [{ data: catCounts, backgroundColor: ['#FFEB9C', '#BDD7EE', '#C6EFCE'] }]
+    },
+    options: { plugins: { legend: { position: 'right' } } }
+  });
+}
+
+function card(label, value, colour) {
+  return `<div class="card"><div class="card-label">${label}</div><div class="card-value ${colour}">${value}</div></div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Subscriptions
+// ---------------------------------------------------------------------------
+function renderSubscriptions() {
+  const body = document.getElementById('subs-body');
+  body.innerHTML = subSummary.map(s => `
+    <tr>
+      <td>${s.subscription_name}</td>
+      <td>${s.vm_sku}</td>
+      <td>${s.vm_count}</td>
+      <td>${utilPill(s.avg_cpu_pct)}</td>
+      <td>${utilPill(s.avg_mem_pct)}</td>
+    </tr>`).join('');
+}
+
+// ---------------------------------------------------------------------------
+// Resource Groups
+// ---------------------------------------------------------------------------
+function renderResourceGroups() {
+  const body = document.getElementById('rg-body');
+  body.innerHTML = rgSummary.map(s => `
+    <tr>
+      <td>${s.subscription_name}</td>
+      <td>${s.resource_group}</td>
+      <td>${s.vm_sku}</td>
+      <td>${s.vm_count}</td>
+      <td>${utilPill(s.avg_cpu_pct)}</td>
+      <td>${utilPill(s.avg_mem_pct)}</td>
+    </tr>`).join('');
+}
+
+// ---------------------------------------------------------------------------
+// VM Groups
+// ---------------------------------------------------------------------------
+function renderGroups() {
+  const typeFilter = document.getElementById('group-type-filter').value;
+  const data = typeFilter ? groupSummary.filter(g => g.group_type === typeFilter) : groupSummary;
+  const body = document.getElementById('groups-body');
+  body.innerHTML = data.map(g => `
+    <tr>
+      <td>${g.subscription_name}</td>
+      <td>${g.resource_group}</td>
+      <td>${g.group_name}</td>
+      <td>${groupTypePill(g.group_type)}</td>
+      <td>${g.vm_sku}</td>
+      <td>${g.vm_count}</td>
+      <td>${utilPill(g.avg_cpu_pct)}</td>
+      <td>${utilPill(g.avg_mem_pct)}</td>
+    </tr>`).join('');
+}
+
+// ---------------------------------------------------------------------------
+// Inventory
+// ---------------------------------------------------------------------------
+function populateFilters() {
+  const subs = [...new Set(vms.map(v => v.subscription_name))].sort();
+  const rgs  = [...new Set(vms.map(v => v.resource_group))].sort();
+  const skus = [...new Set(vms.map(v => v.vm_sku))].sort();
+  fillSelect('inv-sub', subs, 'All subscriptions');
+  fillSelect('inv-rg', rgs, 'All resource groups');
+  fillSelect('inv-sku', skus, 'All SKUs');
+}
+
+function renderInventory() {
+  const search = document.getElementById('inv-search').value.toLowerCase();
+  const sub    = document.getElementById('inv-sub').value;
+  const rg     = document.getElementById('inv-rg').value;
+  const sku    = document.getElementById('inv-sku').value;
+
+  let data = vms;
+  if (sub)    data = data.filter(v => v.subscription_name === sub);
+  if (rg)     data = data.filter(v => v.resource_group === rg);
+  if (sku)    data = data.filter(v => v.vm_sku === sku);
+  if (search) data = data.filter(v =>
+    v.vm_name.toLowerCase().includes(search) ||
+    v.resource_group.toLowerCase().includes(search) ||
+    v.vm_sku.toLowerCase().includes(search)
+  );
+
+  const body = document.getElementById('inv-body');
+  body.innerHTML = data.slice(0, 500).map(v => `
+    <tr>
+      <td>${v.vm_name ? `<strong>${v.vm_name}</strong>` : ''}</td>
+      <td>${v.subscription_name}</td>
+      <td>${v.resource_group}</td>
+      <td>${v.vm_sku}</td>
+      <td>${v.vcpus}</td>
+      <td>${v.memory_gb}</td>
+      <td>${v.region}</td>
+      <td>${v.os_type}</td>
+      <td>${v.os_version || '—'}</td>
+      <td>${v.power_state ? v.power_state.replace('PowerState/', '') : '—'}</td>
+      <td>${v.image_publisher || '—'}</td>
+      <td>${v.image_offer || '—'}</td>
+      <td>${v.image_sku || '—'}</td>
+      <td>${v.image_version || '—'}</td>
+      <td>${v.availability_zone || '—'}</td>
+      <td>${v.vmss_name || '—'}</td>
+      <td>${v.availability_set_name || '—'}</td>
+      <td style="background:var(--csa)">${v.workload || ''}</td>
+      <td style="background:var(--csa)">${v.application || ''}</td>
+      <td style="background:var(--csa)">${v.environment || ''}</td>
+      <td style="background:var(--csa)">${v.criticality || ''}</td>
+      <td style="background:var(--csa)">${v.owner || ''}</td>
+    </tr>`).join('');
+
+  document.getElementById('inv-count').textContent =
+    `Showing ${Math.min(500, data.length)} of ${data.length} VMs`;
+}
+
+// ---------------------------------------------------------------------------
+// Recommendations
+// ---------------------------------------------------------------------------
+function renderRecommendations() {
+  const cat      = document.getElementById('rec-cat').value;
+  const override = document.getElementById('rec-override').value;
+
+  let data = recs;
+  if (cat)      data = data.filter(r => r.category === cat);
+  if (override) data = data.filter(r => r.manual_override === override);
+
+  const body = document.getElementById('rec-body');
+  body.innerHTML = data.map(r => `
+    <tr>
+      <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis" title="${r.resource_id}">${r.resource_id}</td>
+      <td>${r.current_sku}</td>
+      <td>${r.recommended_sku || '—'}</td>
+      <td>${categoryPill(r.category)}</td>
+      <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis" title="${r.recommended_action || ''}">${r.recommended_action || '—'}</td>
+      <td>${r.estimated_savings_pct != null ? r.estimated_savings_pct + '%' : '—'}</td>
+      <td>${overridePill(r.manual_override)}</td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis" title="${r.notes || ''}">${r.notes || ''}</td>
+    </tr>`).join('');
+}
+
+// ---------------------------------------------------------------------------
+// Quota
+// ---------------------------------------------------------------------------
+function renderQuota() {
+  const alertsOnly = document.getElementById('quota-alerts-only')?.checked;
+  let data = quota;
+  if (alertsOnly) data = data.filter(q => q.alert);
+
+  const body = document.getElementById('quota-body');
+  body.innerHTML = data.map(q => {
+    const rowStyle = q.alert ? 'background:#FFC7CE' : '';
+    const pct = q.utilization_pct;
+    const cls = pct >= 90 ? 'pill-red' : pct >= 80 ? 'pill-yellow' : 'pill-green';
+    return `
+    <tr style="${rowStyle}">
+      <td>${q.subscription_name}</td>
+      <td>${q.region}</td>
+      <td>${q.resource_type}</td>
+      <td>${q.display_name}</td>
+      <td>${q.current_usage}</td>
+      <td>${q.quota_limit}</td>
+      <td><span class="pill ${cls}">${pct}%</span></td>
+      <td>${q.alert ? '<span class="pill pill-red">ALERT</span>' : ''}</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('quota-count').textContent =
+    `Showing ${data.length} of ${quota.length} quota entries` +
+    (quota.filter(q => q.alert).length ? ` — ${quota.filter(q => q.alert).length} alert(s)` : '');
+}
+
+// ---------------------------------------------------------------------------
+// Metadata
+// ---------------------------------------------------------------------------
+function renderMetadata() {
+  const t = meta.thresholds || {};
+  const rows = [
+    ['Run Date (UTC)', meta.run_date || '—'],
+    ['Tool Version', meta.tool_version || '—'],
+    ['Metrics Period', `${meta.metrics_period_days} days`],
+    ['Total VM Count', meta.total_vm_count],
+    ['Subscriptions Scanned', (meta.subscriptions_scanned || []).length],
+    ['', ''],
+    ['Underutilized CPU threshold', `${t.underutilized_cpu_avg}%`],
+    ['Underutilized Memory threshold', `${t.underutilized_memory_avg}%`],
+    ['Oversized CPU P95 threshold', `${t.oversize_cpu_p95}%`],
+    ['Headroom Multiplier', `${t.headroom_multiplier}x`],
+    ['PaaS Candidate CPU threshold', `${t.paas_candidate_cpu_avg}%`],
+  ];
+  document.getElementById('meta-table').innerHTML = rows.map(([k, v]) =>
+    `<tr><td>${k}</td><td>${v}</td></tr>`
+  ).join('');
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+function utilPill(v) {
+  if (v == null) return '<span class="pill pill-gray">N/A</span>';
+  const cls = v < 40 ? 'pill-green' : v < 70 ? 'pill-yellow' : 'pill-red';
+  return `<span class="pill ${cls}">${v}%</span>`;
+}
+
+function categoryPill(c) {
+  const map = {
+    'underutilized': 'pill-yellow',
+    'right-size': 'pill-blue',
+    'PaaS-candidate': 'pill-green',
+  };
+  return `<span class="pill ${map[c] || 'pill-gray'}">${c}</span>`;
+}
+
+function overridePill(o) {
+  if (!o) return '<span class="pill pill-gray">pending</span>';
+  const map = { accept: 'pill-green', reject: 'pill-red', defer: 'pill-yellow' };
+  return `<span class="pill ${map[o] || 'pill-gray'}">${o}</span>`;
+}
+
+function groupTypePill(t) {
+  const map = { VMSS: 'pill-blue', AvailabilitySet: 'pill-green', None: 'pill-gray' };
+  return `<span class="pill ${map[t] || 'pill-gray'}">${t}</span>`;
+}
+
+function topSkus(dist) {
+  if (!dist) return '';
+  return Object.entries(dist).slice(0, 3).map(([sku, n]) =>
+    `<span class="pill pill-gray" style="margin:1px">${sku} (${n})</span>`
+  ).join('');
+}
+
+function fillSelect(id, options, placeholder) {
+  const el = document.getElementById(id);
+  const cur = el.value;
+  el.innerHTML = `<option value="">${placeholder}</option>` +
+    options.map(o => `<option value="${o}"${o === cur ? ' selected' : ''}>${o}</option>`).join('');
+}
+
+function sortTable(tableId, colIdx) {
+  const tbody = document.querySelector(`#${tableId} tbody`);
+  const rows = [...tbody.querySelectorAll('tr')];
+  const asc = tbody.dataset.sortCol == colIdx && tbody.dataset.sortDir !== 'asc';
+  tbody.dataset.sortCol = colIdx;
+  tbody.dataset.sortDir = asc ? 'asc' : 'desc';
+  rows.sort((a, b) => {
+    const av = a.cells[colIdx]?.textContent?.trim() ?? '';
+    const bv = b.cells[colIdx]?.textContent?.trim() ?? '';
+    const an = parseFloat(av), bn = parseFloat(bv);
+    const cmp = !isNaN(an) && !isNaN(bn) ? an - bn : av.localeCompare(bv);
+    return asc ? cmp : -cmp;
+  });
+  rows.forEach(r => tbody.appendChild(r));
+}
+
+async function fetchJSON(url, method = 'GET') {
+  const res = await fetch(url, { method });
+  if (!res.ok) return method === 'GET' ? [] : {};
+  return res.json();
+}
+</script>
+</body>
+</html>

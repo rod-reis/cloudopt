@@ -1,0 +1,72 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+.venv-*/
+venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+
+# pytest / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# ruff / linting
+.ruff_cache/
+
+# Output data — NEVER commit customer data
+output/
+output-*/
+*.json
+*.xlsx
+*.csv
+!scope.example.txt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.claude/*
+.vscode/*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Distribution / packaging
+dist/
+*.whl

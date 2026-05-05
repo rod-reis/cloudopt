@@ -1,0 +1,46 @@
+# Sample scope file for Cloudopt Collector.
+#
+# Sections are case-insensitive; lines starting with '#' or ';' are comments.
+# CLI flags passed to `cloudopt collector` override anything here.
+#
+# Filter order of operations:
+#   Tenant -> Subscriptions -> Locations -> ResourceGroups -> Tags
+#
+# Tag operators:
+#   ||  Or
+#   =~  Equals
+#   !~  Not equals
+#
+# Tag values are used in-memory only and are NEVER written to the
+# cloudopt_report.xlsx / cloudopt_report.json output files.
+
+[tenantid]
+00000000-0000-0000-0000-000000000000
+
+[subscriptionids]
+/subscriptions/00000000-0000-0000-0000-000000000001
+/subscriptions/00000000-0000-0000-0000-000000000002
+
+[locations]
+eastus
+westeurope
+
+[resourcegroups]
+/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/RG1
+/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/RG2
+
+[Tags]
+Environment||Env=~Prod||PD||Production
+Criticality=~High
+Owner!~Bill
+
+# ---- Optional runtime knobs ------------------------------------------------
+
+[metricdays]
+30
+
+[concurrency]
+5
+
+[output]
+./output
