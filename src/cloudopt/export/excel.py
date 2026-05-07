@@ -417,7 +417,9 @@ def _sheet_recommendations(wb: Workbook, recommendations: list[VmRecommendation]
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}1"
 
-    # Data validation for Override column (column 11)
+    # Data validation for Override column (column 11).
+    # sqref is set AFTER the row loop so we have the final row count; the DV
+    # is only registered with the sheet if there are rows to cover.
     dv = DataValidation(
         type="list",
         formula1='"accept,reject,defer"',
@@ -426,7 +428,6 @@ def _sheet_recommendations(wb: Workbook, recommendations: list[VmRecommendation]
         errorTitle="Invalid value",
         error="Choose: accept, reject, or defer",
     )
-    ws.add_data_validation(dv)
 
     for row_idx, rec in enumerate(recommendations, start=2):
         alt = row_idx % 2 == 0
@@ -476,11 +477,13 @@ def _sheet_recommendations(wb: Workbook, recommendations: list[VmRecommendation]
         for col_idx in (11, 12):
             ws.cell(row=row_idx, column=col_idx).fill = _CSA_FILL
 
-    # Set the DataValidation sqref as a compact range to avoid the per-cell
-    # space-separated list growing to thousands of characters, which causes
-    # Excel to report "Catastrophic failure" when parsing the sheet XML.
+    # Register the DataValidation only if there are rows; set sqref as a
+    # compact Excel range (e.g. "K2:K101") — NOT per-cell space-separated
+    # list, which grows to thousands of chars and causes "Catastrophic failure"
+    # in Excel's XML parser.
     if recommendations:
         dv.sqref = f"K2:K{len(recommendations) + 1}"
+        ws.add_data_validation(dv)
 
     for col_idx, (_, width) in enumerate(_REC_COLS, start=1):
         ws.column_dimensions[get_column_letter(col_idx)].width = width
