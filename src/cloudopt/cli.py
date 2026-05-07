@@ -135,8 +135,8 @@ def _print_pre_execution_summary(
     )
     console.print()
     console.print("  [bold]Output will be written to:[/bold]")
-    console.print(f"    Excel : [cyan]{output_dir / 'cloudopt_report.xlsx'}[/cyan]")
-    console.print(f"    JSON  : [cyan]{output_dir / 'cloudopt_report.json'}[/cyan]")
+    console.print(f"    JSON  : [cyan]{output_dir}/cloudopt_export_<timestamp>.json[/cyan]")
+    console.print(f"    Excel : [cyan]{output_dir}/cloudopt_report_<timestamp>.xlsx[/cyan] (via analyze)")
     console.print()
 
 
@@ -538,9 +538,21 @@ def collect(
 
     # ── 7. Quota ─────────────────────────────────────────────────────────
     console.print("[bold]Step 7:[/bold] Collecting quota utilisation…")
+
+    # Quota covers ALL in-scope subscriptions — not only those with VMs.
+    # When the scope file lists only [resourcegroups] (no [subscriptionids]),
+    # derive the target subscription IDs from the resource group references.
+    quota_sub_ids = set(scope.quota_subscription_ids)
+    quota_target_subs = (
+        [s for s in target_subs if s.subscription_id.lower() in quota_sub_ids]
+        if quota_sub_ids
+        else target_subs
+    )
+
     quota_items = collect_quota(
         credential=credential,
-        subscriptions=target_subs,
+        subscriptions=quota_target_subs,
+        scope=scope,
         vms_sub_regions=sub_regions_from_vms(vms),
         quota_alert_pct=thresholds.quota_alert_pct,
     )
@@ -589,7 +601,8 @@ def collect(
 
     workload_info = WorkloadInfo()  # blank — CSA fills in alongside the customer
 
-    json_path = eff_output_dir / "cloudopt_report.json"
+    _ts = datetime.datetime.now().strftime("%Y-%m-%d_%H_%M")
+    json_path = eff_output_dir / f"cloudopt_export_{_ts}.json"
 
     write_json(
         vms, all_metrics, recommendations, metadata, json_path,
@@ -600,6 +613,13 @@ def collect(
         workload_info=workload_info,
         zone_mappings=zone_maps,
     )
+
+    # Delete the checkpoint file now that data is safely written to JSON.
+    # If it persists, the next collect run skips all VMs (they're already in
+    # completed_ids) and produces a JSON with empty metrics.
+    _ckpt = eff_output_dir / ".checkpoint.json"
+    if _ckpt.exists():
+        _ckpt.unlink(missing_ok=True)
 
     console.rule("[bold green]Collection complete[/bold green]")
     console.print(f"  JSON  : [cyan]{json_path}[/cyan]")
@@ -649,10 +669,10 @@ def analyze(
         # Customer collects data (no Excel dependency required):
         CLOUDOPT collect --config-file scope.txt
 
-        # Customer shares cloudopt_report.json with the Microsoft engineer.
+        # Customer shares cloudopt_export_<timestamp>.json with the Microsoft engineer.
 
         # MS engineer generates the workbook:
-        CLOUDOPT analyze --from cloudopt_report.json
+        CLOUDOPT analyze --from cloudopt_export_<timestamp>.json
     """
     import json
     from cloudopt.export.excel import write_workbook
@@ -791,7 +811,10 @@ def analyze(
     # --- Write workbook ----------------------------------------------------
     out_dir = output_dir or from_file.parent
     out_dir.mkdir(parents=True, exist_ok=True)
-    xlsx_path = out_dir / (from_file.stem + ".xlsx")
+    # Reuse the timestamp embedded in cloudopt_export_{ts}.json; fallback to now.
+    _stem = from_file.stem
+    _ts = _stem[len("cloudopt_export_"):] if _stem.startswith("cloudopt_export_") else datetime.datetime.now().strftime("%Y-%m-%d_%H_%M")
+    xlsx_path = out_dir / f"cloudopt_report_{_ts}.xlsx"
 
     console.print(f"Writing Excel workbook to [cyan]{xlsx_path}[/cyan]…")
     write_workbook(
@@ -870,7 +893,7 @@ def dashboard(
     data: Annotated[
         Path,
         typer.Option("--data", help="Path to the Excel workbook or JSON file."),
-    ] = Path("output/cloudopt_report.xlsx"),
+    ] = Path("output/cloudopt_report.xlsx"),  # override with timestamped file if needed
     port: Annotated[
         int,
         typer.Option("--port", "-p", help="Local port to serve the dashboard on."),

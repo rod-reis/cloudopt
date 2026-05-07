@@ -102,6 +102,7 @@ class TestQuotaVcpusOnlyFilter:
     def test_skips_non_vcpu_quota_entries(self):
         from cloudopt.collector import quota as quota_mod
         from cloudopt.collector.auth import SubscriptionInfo
+        from cloudopt.scope import build_scope
 
         sub = SubscriptionInfo(
             subscription_id="sub-x",
@@ -117,11 +118,13 @@ class TestQuotaVcpusOnlyFilter:
             _fake_usage("Standard NCSv3 Family GPUs", current=0, limit=8),
         ]
 
+        scope = build_scope(locations=["eastus"])
+
         with patch.object(quota_mod, "ComputeManagementClient", return_value=fake_client):
             results = quota_mod.collect_quota(
                 credential=MagicMock(),
                 subscriptions=[sub],
-                vms_sub_regions={"sub-x": {"eastus"}},
+                scope=scope,
             )
 
         display_names = sorted(q.display_name for q in results)

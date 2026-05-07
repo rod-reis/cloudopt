@@ -89,7 +89,7 @@ def create_app(data_path: Path) -> FastAPI:
             if mask_subscription_ids_in_string(raw_id) == resource_id or raw_id == resource_id:
                 return {
                     name: {
-                        "avg": m.avg, "p50": m.p50, "p95": m.p95,
+                        "avg": m.avg, "p50": m.p50, "p95": m.p95, "p99": m.p99,
                         "max": m.max, "min": m.min,
                         "time_series": [{"date": p.date, "value": p.value} for p in m.time_series],
                     }

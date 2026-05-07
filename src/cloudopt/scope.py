@@ -202,6 +202,28 @@ class ScopeFilter:
     output_dir: Path | None = None
 
     @property
+    def quota_subscription_ids(self) -> tuple[str, ...]:
+        """Subscription IDs to target for quota collection.
+
+        Returns explicit ``subscription_ids`` when set; otherwise derives them
+        from ``resource_groups`` entries so that a scope file that only lists
+        ``[resourcegroups]`` still produces meaningful quota data for those
+        subscriptions.  Returns an empty tuple when neither is configured,
+        which callers interpret as "all accessible subscriptions".
+        """
+        if self.subscription_ids:
+            return self.subscription_ids
+        if self.resource_groups:
+            seen: set[str] = set()
+            result: list[str] = []
+            for rg in self.resource_groups:
+                if rg.subscription_id not in seen:
+                    seen.add(rg.subscription_id)
+                    result.append(rg.subscription_id)
+            return tuple(result)
+        return ()
+
+    @property
     def has_resource_group_filter(self) -> bool:
         return bool(self.resource_groups)
 

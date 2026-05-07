@@ -54,6 +54,7 @@ output-*/
 *.xlsx
 *.csv
 !scope.example.txt
+CLAUDE.md
 
 # IDE
 .vscode/

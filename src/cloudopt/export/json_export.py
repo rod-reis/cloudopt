@@ -111,6 +111,7 @@ def _metrics_dict(m: VmMetrics) -> dict:
         "avg": m.avg,
         "p50": m.p50,
         "p95": m.p95,
+        "p99": m.p99,
         "max": m.max,
         "min": m.min,
         "time_series": [{"date": p.date, "value": p.value} for p in m.time_series],

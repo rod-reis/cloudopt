@@ -16,6 +16,7 @@ Sheet layout (11 sheets):
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -228,10 +229,11 @@ def _sheet_inventory(wb: Workbook, vms: list[VmInventory]) -> None:
 # ---------------------------------------------------------------------------
 
 _PERF_METRICS = [
-    ("Avg CPU %", "Percentage CPU", "avg"),
-    ("P95 CPU %", "Percentage CPU", "p95"),
-    ("Max CPU %", "Percentage CPU", "max"),
-    ("Min CPU %", "Percentage CPU", "min"),
+    ("Avg CPU %",       "Percentage CPU", "avg"),
+    ("P95 CPU %",       "Percentage CPU", "p95"),
+    ("P99 CPU %",       "Percentage CPU", "p99"),
+    ("Max CPU % (Peak)", "Percentage CPU", "max"),
+    ("Min CPU %",       "Percentage CPU", "min"),
     ("Avg Mem Avail (GB)", "Available Memory Bytes", "avg"),
     ("Disk Read IOps", "Disk Read Operations/Sec", "avg"),
     ("Disk Write IOps", "Disk Write Operations/Sec", "avg"),
@@ -277,8 +279,8 @@ def _sheet_perf_summary(
             if alt:
                 cell.fill = _ALT_FILL
 
-            # Colour-code CPU columns (Avg, P95, Max, Min)
-            if col_idx in (7, 8, 9, 10) and value is not None:
+            # Colour-code CPU columns (Avg, P95, P99, Max, Min)
+            if col_idx in (7, 8, 9, 10, 11) and value is not None:
                 if value < 40:
                     cell.fill = _GREEN_FILL
                 elif value < 70:
@@ -309,7 +311,7 @@ def _sheet_sku_flat(
     Columns: <group_fields...> | VM SKU | VM Count | Avg CPU % | Avg Mem %
     """
     ws = wb.create_sheet(sheet_name)
-    headers = col_headers + ["VM SKU", "VM Count", "Avg CPU %", "Avg Mem %"]
+    headers = col_headers + ["VM SKU", "VM Count", "Avg CPU %", "P95 CPU %", "P99 CPU %", "Max CPU % (Peak)", "Min CPU %", "Avg Mem %"]
     _write_header(ws, headers)
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}1"
@@ -321,25 +323,30 @@ def _sheet_sku_flat(
         row_groups.setdefault(key, []).append(vm)
 
     n_group = len(group_model_fields)
-    cpu_col = n_group + 3  # group cols + sku + vm_count → then cpu
-    mem_col = cpu_col + 1
+    avg_cpu_col = n_group + 3  # group cols + VM SKU + VM Count → Avg CPU
+    mem_col = avg_cpu_col + 5  # after Avg, P95, P99, Max, Min
 
     for row_idx, (key, group_vms) in enumerate(sorted(row_groups.items()), start=2):
         alt = row_idx % 2 == 0
         *group_vals, sku = key
         avg_cpu = _avg_metric(group_vms, metrics_by_vm, "Percentage CPU", "avg")
+        p95_cpu = _avg_metric(group_vms, metrics_by_vm, "Percentage CPU", "p95")
+        p99_cpu = _avg_metric(group_vms, metrics_by_vm, "Percentage CPU", "p99")
+        max_cpu = _avg_metric(group_vms, metrics_by_vm, "Percentage CPU", "max")
+        min_cpu = _avg_metric(group_vms, metrics_by_vm, "Percentage CPU", "min")
         avg_mem = _avg_mem_pct(group_vms, metrics_by_vm)
-        row_data = list(group_vals) + [sku, len(group_vms), avg_cpu, avg_mem]
+        row_data = list(group_vals) + [sku, len(group_vms), avg_cpu, p95_cpu, p99_cpu, max_cpu, min_cpu, avg_mem]
         for col_idx, val in enumerate(row_data, start=1):
             cell = ws.cell(row=row_idx, column=col_idx, value=val)
             cell.border = _THIN_BORDER
             cell.font = Font(size=9)
             if alt:
                 cell.fill = _ALT_FILL
-        _colour_util(ws.cell(row=row_idx, column=cpu_col), avg_cpu)
+        for cpu_col in range(avg_cpu_col, avg_cpu_col + 5):
+            _colour_util(ws.cell(row=row_idx, column=cpu_col), row_data[cpu_col - 1])
         _colour_util(ws.cell(row=row_idx, column=mem_col), avg_mem)
 
-    all_widths = col_widths + [22, 10, 13, 13]
+    all_widths = col_widths + [22, 10, 13, 13, 13, 17, 13, 13]
     for col_idx, w in enumerate(all_widths, start=1):
         ws.column_dimensions[get_column_letter(col_idx)].width = w
 
@@ -468,7 +475,12 @@ def _sheet_recommendations(wb: Workbook, recommendations: list[VmRecommendation]
         # Override + Notes are CSA-editable (columns 11, 12)
         for col_idx in (11, 12):
             ws.cell(row=row_idx, column=col_idx).fill = _CSA_FILL
-        dv.add(ws.cell(row=row_idx, column=11))
+
+    # Set the DataValidation sqref as a compact range to avoid the per-cell
+    # space-separated list growing to thousands of characters, which causes
+    # Excel to report "Catastrophic failure" when parsing the sheet XML.
+    if recommendations:
+        dv.sqref = f"K2:K{len(recommendations) + 1}"
 
     for col_idx, (_, width) in enumerate(_REC_COLS, start=1):
         ws.column_dimensions[get_column_letter(col_idx)].width = width
@@ -569,7 +581,7 @@ def _read_quota_sheet(wb) -> list[QuotaItem]:
 
 def _sheet_raw_metrics(wb: Workbook, metrics: list[VmMetrics]) -> None:
     ws = wb.create_sheet("Raw Metrics")
-    headers = ["Resource ID", "Metric", "Avg", "P50", "P95", "Max", "Min", "Data Points"]
+    headers = ["Resource ID", "Metric", "Avg", "P50", "P95", "P99", "Max", "Min", "Data Points"]
     _write_header(ws, headers)
 
     from cloudopt.models import mask_subscription_ids_in_string
@@ -578,7 +590,7 @@ def _sheet_raw_metrics(wb: Workbook, metrics: list[VmMetrics]) -> None:
         row = [
             mask_subscription_ids_in_string(m.resource_id),
             m.metric_name,
-            _fmt(m.avg), _fmt(m.p50), _fmt(m.p95), _fmt(m.max), _fmt(m.min),
+            _fmt(m.avg), _fmt(m.p50), _fmt(m.p95), _fmt(m.p99), _fmt(m.max), _fmt(m.min),
             len(m.time_series),
         ]
         for col_idx, val in enumerate(row, start=1):
@@ -867,6 +879,47 @@ def _sheet_metadata(wb: Workbook, metadata: CollectionMetadata) -> None:
             key_cell.font = Font(size=9)
             val_cell.font = Font(size=9)
 
+    # ------------------------------------------------------------------
+    # Performance Metrics Reference table
+    # Checked metrics (✅) are the ones actively collected and used by
+    # the recommendations engine.
+    # ------------------------------------------------------------------
+    _METRICS: list[tuple[str, str, bool]] = [
+        ("Avg",          "baseline context",            False),
+        ("P50",          "typical workload",            False),
+        ("P95",          "primary optimization signal", True),
+        ("P99",          "safety / risk signal",        True),
+        ("Max",          "spike detection",             False),
+        ("Min",          "anomaly / idle",              False),
+        ("Data Points",  "confidence level",            True),
+    ]
+    _CHECKED_FILL = PatternFill("solid", fgColor="C6EFCE")   # light green
+
+    # Blank separator row, then section header
+    section_start = row_idx + 2
+    hdr_cell = ws.cell(row=section_start, column=1, value="Performance Metrics Reference")
+    hdr_cell.font = Font(bold=True, size=10)
+
+    # Column headers
+    col_hdr_row = section_start + 1
+    for col, label in enumerate(("Metric", "Why"), start=1):
+        cell = ws.cell(row=col_hdr_row, column=col, value=label)
+        cell.fill = _HDR_FILL
+        cell.font = _HDR_FONT
+        cell.alignment = Alignment(horizontal="left")
+
+    # Data rows
+    for offset, (metric, reason, checked) in enumerate(_METRICS, start=1):
+        data_row = col_hdr_row + offset
+        label = f"\u2705 {metric}" if checked else metric
+        m_cell = ws.cell(row=data_row, column=1, value=label)
+        r_cell = ws.cell(row=data_row, column=2, value=reason)
+        if checked:
+            m_cell.fill = _CHECKED_FILL
+            r_cell.fill = _CHECKED_FILL
+        m_cell.font = Font(size=9, bold=checked)
+        r_cell.font = Font(size=9)
+
 
 # ---------------------------------------------------------------------------
 # Read-back helpers (for export command)
@@ -906,6 +959,7 @@ def _read_inventory_sheet(wb) -> list[VmInventory]:
                     os_type=col(row, "OS Type") or "Unknown",
                     os_version=col(row, "OS Version"),
                     power_state=col(row, "Power State"),
+                    last_state_change=str(col(row, "Last State Change")) if col(row, "Last State Change") else None,
                     image_publisher=col(row, "Image Publisher"),
                     image_offer=col(row, "Image Offer"),
                     image_sku=col(row, "Image SKU"),
@@ -1059,6 +1113,10 @@ def _add_table(ws: Worksheet, name: str, data_rows: int) -> None:
         showColumnStripes=False,
     )
     ws.add_table(table)
+    # A Table provides its own AutoFilter on the header row; the sheet-level
+    # AutoFilter (set earlier via ws.auto_filter.ref) would produce a duplicate
+    # <autoFilter> element that Excel rejects, causing tables to be removed.
+    ws.auto_filter.ref = None
 
 
 def _auto_width(ws: Worksheet, headers: list[str]) -> None:

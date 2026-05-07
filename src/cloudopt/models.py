@@ -135,6 +135,7 @@ class VmMetrics(BaseModel):
     avg: Optional[float] = None
     p50: Optional[float] = None
     p95: Optional[float] = None
+    p99: Optional[float] = None
     max: Optional[float] = None
     min: Optional[float] = None
     time_series: list[DailyDataPoint] = Field(default_factory=list)

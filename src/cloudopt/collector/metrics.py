@@ -230,6 +230,7 @@ async def _fetch_metric(
     n = len(raw_values_sorted)
     p50 = _percentile(raw_values_sorted, 50)
     p95 = _percentile(raw_values_sorted, 95)
+    p99 = _percentile(raw_values_sorted, 99)
 
     return VmMetrics(
         resource_id=resource_id,
@@ -237,6 +238,7 @@ async def _fetch_metric(
         avg=statistics.mean(raw_values),
         p50=p50,
         p95=p95,
+        p99=p99,
         max=max(max_vals) if max_vals else max(raw_values),
         min=min(min_vals) if min_vals else min(raw_values),
         time_series=time_series_data,
