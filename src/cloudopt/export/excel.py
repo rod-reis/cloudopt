@@ -196,6 +196,7 @@ def _sheet_inventory(wb: Workbook, vms: list[VmInventory]) -> None:
     for row_idx, vm in enumerate(vms, start=2):
         alt = row_idx % 2 == 0
         for col_idx, (_, field, _) in enumerate(_INVENTORY_COLS, start=1):
+            val: Any
             if field == "masked_subscription_id":
                 val = vm.masked_subscription_id()
             elif field == "masked_resource_id":
@@ -965,7 +966,6 @@ def _read_inventory_sheet(wb) -> list[VmInventory]:
                     os_type=col(row, "OS Type") or "Unknown",
                     os_version=col(row, "OS Version"),
                     power_state=col(row, "Power State"),
-                    last_state_change=str(col(row, "Last State Change")) if col(row, "Last State Change") else None,
                     image_publisher=col(row, "Image Publisher"),
                     image_offer=col(row, "Image Offer"),
                     image_sku=col(row, "Image SKU"),
@@ -1142,7 +1142,7 @@ def _colour_util(cell, value: float | None) -> None:
         cell.fill = _RED_FILL
 
 
-def _fmt(val: float | None, decimals: int = 2) -> str | None:
+def _fmt(val: float | None, decimals: int = 2) -> float | None:
     if val is None:
         return None
     return round(val, decimals)

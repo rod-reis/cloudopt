@@ -27,7 +27,7 @@ from __future__ import annotations
 import asyncio
 import statistics
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, cast
 
 from azure.identity import DefaultAzureCredential
 from azure.mgmt.resourcegraph import ResourceGraphClient
@@ -208,7 +208,7 @@ def collect_appinsights_inventory(
                 req = QueryRequest(subscriptions=batch, query=_build_ai_query(scope), options=opts)
                 resp = rg_client.resources(req)
 
-                for row in resp.data or []:
+                for row in cast(list[dict[str, Any]], resp.data or []):
                     sub_id = row.get("subscriptionId", "")
                     workspace_id: str | None = row.get("workspaceId") or None
                     if not workspace_id:
@@ -303,7 +303,7 @@ async def collect_appinsights_metrics(
                 description=f"[{sub_name[:24]}] App Insights…",
             )
 
-            async with MonitorManagementClient(credential, sub_id) as monitor_client:
+            async with MonitorManagementClient(credential, sub_id) as monitor_client:  # type: ignore[arg-type]
                 # Process in batches of `concurrency` to cap in-flight tasks
                 for batch_start in range(0, len(sub_components), concurrency):
                     batch = sub_components[batch_start : batch_start + concurrency]
@@ -492,7 +492,7 @@ async def _collect_jvm_metrics(
                 options=QueryRequestOptions(result_format="objectArray"),
             )
             resp = rg_client.resources(req)
-            for row in resp.data or []:
+            for row in cast(list[dict[str, Any]], resp.data or []):
                 rid = (row.get("id") or "").lower()
                 cid = row.get("customerId", "")
                 if rid and cid:
@@ -538,7 +538,7 @@ async def _collect_jvm_metrics(
     ) -> list[AppInsightsMetrics]:
         async with semaphore:
             try:
-                async with LogsQueryClient(credential) as la_client:
+                async with LogsQueryClient(credential) as la_client:  # type: ignore[arg-type]
                     response = await la_client.query_workspace(
                         workspace_id=customer_id,
                         query=la_query,

@@ -7,7 +7,7 @@ per query — batches automatically for larger estates.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from azure.identity import DefaultAzureCredential
 from azure.mgmt.resourcegraph import ResourceGraphClient
@@ -142,7 +142,7 @@ def collect_inventory(
                     options=options,
                 )
                 response = client.resources(request)
-                raw_rows.extend(response.data or [])
+                raw_rows.extend(cast(list[dict[str, Any]], response.data or []))
 
                 skip_token = getattr(response, "skip_token", None)
                 if not skip_token:
@@ -230,7 +230,7 @@ def _row_to_vm(
             disk_sizes_gb=disk_sizes,
             vmss_name=_last_segment(vmss_raw) if vmss_raw else None,
             availability_set_name=_last_segment(avset_raw) if avset_raw else None,
-            raw_properties=row.get("properties") if isinstance(row.get("properties"), dict) else {},
+            raw_properties=cast(dict, row.get("properties")) if isinstance(row.get("properties"), dict) else {},
         )
     except Exception:
         return None
@@ -276,7 +276,7 @@ def count_resources_by_type(
         )
         try:
             resp = client.resources(req)
-            for row in resp.data or []:
+            for row in cast(list[dict[str, Any]], resp.data or []):
                 sub_id = row.get("subscriptionId", "")
                 rtype = (row.get("type") or "").lower()
                 count = int(row.get("count_", 0))

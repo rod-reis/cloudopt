@@ -134,7 +134,7 @@ async def collect_metrics(
                 description=f"[{sub_name[:24]}] VM metrics…",
             )
 
-            async with MonitorManagementClient(credential, sub_id) as client:
+            async with MonitorManagementClient(credential, sub_id) as client:  # type: ignore[arg-type]
 
                 async def collect_vm(vm: VmInventory, _client=client) -> list[VmMetrics]:
                     vm_metrics: list[VmMetrics] = []

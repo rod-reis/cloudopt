@@ -11,7 +11,7 @@ server-side (KQL) and client-side (model construction) for safety.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from azure.identity import DefaultAzureCredential
 from azure.mgmt.resourcegraph import ResourceGraphClient
@@ -145,7 +145,7 @@ def collect_advisor_sku_recommendations(
                         f"[yellow]Warning:[/yellow] Advisor query failed: {exc}"
                     )
                     return []
-                rows.extend(resp.data or [])
+                rows.extend(cast(list[dict[str, Any]], resp.data or []))
                 skip_token = getattr(resp, "skip_token", None)
                 if not skip_token:
                     break

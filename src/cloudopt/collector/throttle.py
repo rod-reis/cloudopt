@@ -160,9 +160,10 @@ async def with_retry(
                 status = exc.status_code or 0
                 if status == 429:
                     retry_after: float | None = None
-                    if exc.response and "Retry-After" in exc.response.headers:
+                    _resp_headers = getattr(exc.response, "headers", {}) if exc.response else {}
+                    if _resp_headers and "Retry-After" in _resp_headers:
                         try:
-                            retry_after = float(exc.response.headers["Retry-After"])
+                            retry_after = float(_resp_headers["Retry-After"])
                         except ValueError:
                             pass
                     await throttle.backoff_on_throttle(subscription_id, retry_after)
