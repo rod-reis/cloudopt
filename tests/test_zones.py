@@ -100,7 +100,7 @@ class TestListLocationsRaw:
         ]
         with patch("urllib.request.urlopen", side_effect=responses):
             locs = _list_locations_raw("tok", SUB_ID)
-        assert [l["name"] for l in locs] == ["eastus", "westus"]
+        assert [loc["name"] for loc in locs] == ["eastus", "westus"]
 
     def test_raises_on_http_error(self):
         err = urllib.error.HTTPError(

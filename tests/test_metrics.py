@@ -1,16 +1,12 @@
 """Tests for metrics collection helpers: _percentile and checkpoint round-trip."""
-import json
 import pytest
-import asyncio
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+
+from cloudopt.collector.metrics import _percentile, _save_checkpoint, _load_checkpoint
 
 
 # ---------------------------------------------------------------------------
 # _percentile
 # ---------------------------------------------------------------------------
-
-from cloudopt.collector.metrics import _percentile
 
 
 class TestPercentile:
@@ -54,8 +50,6 @@ class TestPercentile:
 # Checkpoint save / load
 # (checkpoint stores completed resource IDs as a set[str], not VmMetrics)
 # ---------------------------------------------------------------------------
-
-from cloudopt.collector.metrics import _save_checkpoint, _load_checkpoint
 
 
 class TestCheckpoint:

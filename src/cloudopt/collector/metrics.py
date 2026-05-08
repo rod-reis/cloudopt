@@ -245,7 +245,6 @@ async def _fetch_metric(
         return None
 
     raw_values_sorted = sorted(raw_values)
-    n = len(raw_values_sorted)
     p50 = _percentile(raw_values_sorted, 50)
     p95 = _percentile(raw_values_sorted, 95)
     p99 = _percentile(raw_values_sorted, 99)

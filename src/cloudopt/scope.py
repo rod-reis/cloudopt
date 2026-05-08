@@ -34,7 +34,7 @@ Filter order of operations (applied to discovered resources):
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
@@ -282,7 +282,7 @@ def build_scope(
     """Validate and build a :class:`ScopeFilter` from raw user inputs."""
     sub_ids = tuple(parse_subscription_id(s) for s in (subscriptions or []) if s)
     rg_refs = tuple(parse_resource_group_id(r) for r in (resource_groups or []) if r)
-    locs = tuple((l or "").strip().lower() for l in (locations or []) if (l or "").strip())
+    locs = tuple((loc or "").strip().lower() for loc in (locations or []) if (loc or "").strip())
     tag_filters = tuple(TagFilter.parse(t) for t in (tags or []) if (t or "").strip())
 
     # Resource groups must reference in-scope subscriptions if any are given.

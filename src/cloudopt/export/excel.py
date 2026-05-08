@@ -17,7 +17,6 @@ Sheet layout (11 sheets):
 
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -619,7 +618,6 @@ def _sheet_appinsights(
     metrics: list[AppInsightsMetrics],
 ) -> None:
     """App Insights inventory + summarised metrics in a single sheet."""
-    from cloudopt.models import mask_subscription_ids_in_string
 
     ws = wb.create_sheet("App Insights")
 

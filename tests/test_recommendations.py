@@ -1,10 +1,8 @@
 """Tests for the recommendation engine — rules 1–3 (availability rule removed)."""
-import pytest
 from cloudopt.models import (
     CollectionThresholds,
     VmInventory,
     VmMetrics,
-    DailyDataPoint,
 )
 from cloudopt.analyzer.recommendations import generate_recommendations
 from cloudopt.analyzer.sku_catalog import SkuCatalog, SkuSpec

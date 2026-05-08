@@ -1,6 +1,6 @@
 """Tests for the Resource Graph inventory collector."""
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 from cloudopt.collector.inventory import _row_to_vm
 from cloudopt.analyzer.sku_catalog import SkuCatalog, SkuSpec
 

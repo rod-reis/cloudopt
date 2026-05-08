@@ -2,7 +2,6 @@
 import json
 import csv
 import pytest
-from pathlib import Path
 from cloudopt.models import (
     CollectionMetadata,
     CollectionThresholds,

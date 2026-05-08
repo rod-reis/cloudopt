@@ -439,7 +439,7 @@ def collect(
     # ── 2. Pre-execution summary ─────────────────────────────────────────
     console.print("[bold]Step 2:[/bold] Counting resources across subscriptions…")
     resource_counts = count_resources_by_type(credential, target_subs, scope=scope)
-    console.print(f"[green]✓[/green] Resource counts ready.\n")
+    console.print("[green]✓[/green] Resource counts ready.\n")
 
     _print_pre_execution_summary(
         target_subs=target_subs,
