@@ -111,5 +111,5 @@ cloudopt dashboard --data output/cloudopt_report.xlsx
 | Guide                        | Purpose                                                                                      |
 | ---------------------------- | -------------------------------------------------------------------------------------------- |
 | [COLLECTOR.md](COLLECTOR.md) | Full `collect` option reference, scope files, thresholds, what is collected, troubleshooting |
-| [ANALYZER.md](ANALYZER.md)   | Excel generation, dashboard, export, workbook structure, CSA-editable fields                 |
+| [ANALYZER.md](ANALYZER.md)   | Excel generation, dashboard, export, workbook structure, analyst-editable fields             |
 | [REPORTER.md](REPORTER.md)   | Final report generation from the analyzed workbook *(coming soon)*                           |

@@ -20,7 +20,7 @@ flowchart LR
         B --> C[(cloudopt_report.json)]
     end
 
-    subgraph Engineer["MS Engineer (no Azure access needed)"]
+    subgraph Engineer["Engineer (no Azure access needed)"]
         C --> D[cloudopt analyze]
         D --> E[(cloudopt_report.xlsx)]
         E --> F[cloudopt dashboard]
@@ -72,7 +72,7 @@ flowchart TD
     end
 
     DASH[dashboard/app.py\nFastAPI local server]
-    SCOPE[scope.py\nWARA-style scope filter]
+    SCOPE[scope.py\nScope + filter resolution]
 
     CLI --> AUTH
     AUTH --> INV & MET & APP & ADV & QUO & ZON
@@ -164,7 +164,7 @@ az login
 # 2. Collect from all accessible subscriptions (30 days of metrics)
 cloudopt collect --output output/
 
-# 3. Share output/cloudopt_report.json with the Microsoft engineer
+# 3. Share output/cloudopt_report.json with the analyst/engineer
 ```
 
 The engineer then runs (no Azure access required):
@@ -184,9 +184,9 @@ cloudopt dashboard --data output/cloudopt_report.xlsx
 | Command              | Who runs it | Description                                            |
 | -------------------- | ----------- | ------------------------------------------------------ |
 | `cloudopt collect`   | Customer    | Full collection: inventory + metrics + quota + Advisor |
-| `cloudopt analyze`   | MS Engineer | Generates Excel workbook from JSON                     |
-| `cloudopt dashboard` | MS Engineer | Local FastAPI web dashboard                            |
-| `cloudopt export`    | MS Engineer | Re-exports workbook to JSON / CSV                      |
+| `cloudopt analyze`   | Engineer    | Generates Excel workbook from JSON                     |
+| `cloudopt dashboard` | Engineer    | Local FastAPI web dashboard                            |
+| `cloudopt export`    | Engineer    | Re-exports workbook to JSON / CSV                      |
 | `cloudopt version`   | Anyone      | Print version                                          |
 
 See [HOW_TO.md](HOW_TO.md) for full option reference.
@@ -240,7 +240,7 @@ Uses `DefaultAzureCredential` — tries in order:
 src/cloudopt/
 ├── cli.py                  # Typer CLI entry point (collect / analyze / dashboard / export)
 ├── models.py               # Pydantic v2 data models (VmInventory, VmMetrics, …)
-├── scope.py                # WARA-style scope + filter resolution
+├── scope.py                # Scope + filter resolution
 ├── config.py               # Interactive threshold prompts
 ├── collector/
 │   ├── auth.py             # DefaultAzureCredential helpers, subscription enumeration
@@ -297,7 +297,7 @@ pytest tests/test_metrics.py             # single file
 | ---------------------------- | ------------------------------------------------------------------------------ |
 | [HOW_TO.md](HOW_TO.md)       | Installation, authentication, quick start, command overview                    |
 | [COLLECTOR.md](COLLECTOR.md) | Full `collect` reference — options, scope files, thresholds, what is collected |
-| [ANALYZER.md](ANALYZER.md)   | Excel generation, dashboard, export, workbook structure, CSA fields            |
+| [ANALYZER.md](ANALYZER.md)   | Excel generation, dashboard, export, workbook structure, analyst-editable fields |
 | [REPORTER.md](REPORTER.md)   | Final report generation from the analyzed workbook *(coming soon)*             |
 
 ---

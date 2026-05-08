@@ -18,7 +18,7 @@ cloudopt collect [OPTIONS]
 | Option                             | Default        | Description                                                                                                                                                     |
 | ---------------------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--tenant-id` / `-t`               | —              | Microsoft Entra tenant GUID. When set, only subscriptions in this tenant are used and the credential is pinned to it.                                           |
-| `--config-file` / `-c`             | —              | WARA-style scope file (see [Scope file](#scope-file---config-file)). CLI flags override values loaded from the file.                                            |
+| `--config-file` / `-c`             | —              | Scope configuration file (see [Scope file](#scope-file---config-file)). CLI flags override values loaded from the file.                                            |
 | `--subscriptions` / `-s`           | all accessible | Subscription ID(s) — bare GUID **or** `/subscriptions/<guid>`. Repeatable.                                                                                      |
 | `--subscriptions-file` / `-f`      | —              | Path to a text file of subscription IDs (one per line).                                                                                                         |
 | `--regions` / `--locations` / `-r` | all regions    | ARM region name(s), e.g. `eastus`. Repeatable. **Global filter** — applied to inventory, App Insights, Advisor, and quota queries.                              |
@@ -101,7 +101,7 @@ cloudopt collect --output /tmp/azure-report
 
 ## Scope file (`--config-file`)
 
-A WARA-style text file that captures the full collection scope and runtime settings
+A scope configuration text file that captures the full collection scope and runtime settings
 in one place. Sections are case-insensitive; lines starting with `#` or `;` are
 comments. CLI flags override anything loaded from the file.
 

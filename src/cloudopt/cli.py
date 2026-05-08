@@ -176,11 +176,11 @@ def collect(
             "--config-file",
             "-c",
             help=(
-                "Path to a WARA-style scope text file with "
+                "Path to a scope configuration text file with "
                 "[tenantid] / [subscriptionids] / [locations] / "
                 "[resourcegroups] / [tags] / [metricdays] / [concurrency] / "
                 "[output] sections. CLI flags override values loaded from "
-                "this file."
+                "this file. See scope.example.txt for a template."
             ),
             exists=True,
             file_okay=True,
@@ -587,7 +587,7 @@ def collect(
         mask_subscription_id,
     )
 
-    recommendations: list = []  # Left blank for CSA to fill in manually
+    recommendations: list = []  # Populated during the analyze step
 
     metadata = CollectionMetadata(
         run_date=datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -599,7 +599,7 @@ def collect(
         thresholds=thresholds,
     )
 
-    workload_info = WorkloadInfo()  # blank — CSA fills in alongside the customer
+    workload_info = WorkloadInfo()  # Populated during the analyze step
 
     _ts = datetime.datetime.now().strftime("%Y-%m-%d_%H_%M")
     json_path = eff_output_dir / f"cloudopt_export_{_ts}.json"
@@ -918,6 +918,14 @@ def dashboard(
         raise typer.Exit(code=1)
 
     web_app = create_app(data_path=data)
+
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        console.print(
+            f"[yellow]Warning:[/yellow] Binding to {host} exposes the dashboard "
+            "to the network. The dashboard has no authentication. "
+            "Use only in a trusted, isolated environment."
+        )
+
     console.print(
         f"\n[bold]Dashboard running at[/bold] [cyan]http://{host}:{port}[/cyan]"
     )

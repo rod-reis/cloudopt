@@ -1,4 +1,4 @@
-"""Tests for the WARA-style scope/filter parsing."""
+"""Tests for scope/filter parsing."""
 
 from __future__ import annotations
 
@@ -203,7 +203,7 @@ def test_scope_from_config_file(tmp_path: Path):
     cfg = tmp_path / "scope.txt"
     cfg.write_text(
         f"""
-        # WARA-style scope file
+        # cloudopt scope configuration file
         [tenantid]
         00000000-0000-0000-0000-000000000099
 

@@ -56,13 +56,14 @@ output-*/
 !scope.example.txt
 CLAUDE.md
 
-# IDE
+# IDE & AI assistant configuration (not part of the public tool)
 .vscode/
 .idea/
 *.swp
 *.swo
 .claude/*
 .vscode/*
+.github/copilot-instructions.md
 
 # OS
 .DS_Store

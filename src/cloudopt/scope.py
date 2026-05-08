@@ -1,11 +1,11 @@
-"""WARA-style scope/filter handling.
+"""Scope/filter handling.
 
 Defines a single immutable :class:`ScopeFilter` that captures the user's
 collection scope (tenant, subscriptions, locations, resource groups, tag
 filters, plus runtime knobs such as metric_days / concurrency / output_dir)
 and parses both:
 
-* the WARA-style ``configfile`` (text file with ``[section]`` blocks), and
+* the ``configfile`` (text file with ``[section]`` blocks), and
 * the equivalent CLI flags.
 
 Tag filters are intentionally **never persisted** by callers — they are used
@@ -13,7 +13,7 @@ only to decide which resources are in scope at collection time.  The
 :class:`ScopeFilter` exposes the parsed tag filters but the rest of the
 pipeline is responsible for not writing them out.
 
-Tag filter grammar (matches WARA):
+Tag filter grammar:
 
     Operator  Action
     ||        Or     (separates names on the LHS, separates values on the RHS)
@@ -345,7 +345,7 @@ _SECTION_ALIASES: dict[str, str] = {
 
 
 def parse_config_file(path: Path) -> dict[str, list[str]]:
-    """Parse a WARA-style configfile into ``{section_key: [lines...]}``.
+    """Parse a scope configfile into ``{section_key: [lines...]}``.
 
     Lines starting with ``#`` or ``;`` are comments.  Blank lines are ignored.
     Section headers are recognised case-insensitively and mapped through

@@ -390,7 +390,7 @@ def _aggregate_flat_groups(
 
 
 def _rec_action_text(r: VmRecommendation) -> str:
-    """Plain-English recommended action for the CSA to present to the customer."""
+    """Plain-English recommended action to present to the customer."""
     if r.category == "underutilized":
         if r.recommended_sku:
             return f"Resize to {r.recommended_sku} or decommission if unused"
