@@ -118,7 +118,7 @@ The generated workbook contains the following sheets:
 | Sheet                        | Contents                                                                                                                             |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | VM Inventory                 | One row per VM: SKU, vCPUs, memory, region, zones, OS image, power state, disk layout, NIC count, VMSS / availability-set membership |
-| Performance Summary          | Avg / P50 / P95 / Max CPU, memory, disk I/O, and network per VM                                                                      |
+| Performance Summary          | Avg / P50 / P95 / P99 / Max CPU, Min CPU, memory, disk I/O, and network per VM                                                       |
 | SKU Perf by Subscription     | Metrics aggregated by subscription                                                                                                   |
 | SKU Perf by Resource Group   | Metrics aggregated by resource group                                                                                                 |
 | SKU Perf by VMSS             | Metrics for VMSS-grouped VMs                                                                                                         |

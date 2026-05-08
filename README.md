@@ -199,16 +199,15 @@ See [HOW_TO.md](HOW_TO.md) for full option reference.
 
 - **Inventory**: resource ID, subscription, resource group, region, zone, SKU, vCPUs,
   memory, OS type, OS image, disk layout, NIC count, power state, VMSS / availability-set
-- **Platform metrics** (30-day default, configurable 1–90 days) — sourced from the
-  **Azure Monitor Metrics API** (host-level, no guest agent or VM Insights required):
+- **Platform metrics** (30-day default, configurable 1–90 days) — sourced from the **Azure Monitor Metrics API** (host-level, no guest agent or VM Insights required):
 
-| Metric                       | Stats              |
-| ---------------------------- | ------------------ |
-| CPU %                        | avg, P50, P95, max |
-| Available Memory Bytes       | avg, P50, P95, max |
-| Disk Read / Write Bytes/sec  | avg, P50, P95, max |
-| Disk Read / Write IOPS       | avg, P50, P95, max |
-| Network In / Out Total Bytes | avg, P50, P95, max |
+| Metric                       | Stats                        |
+| ---------------------------- | ---------------------------- |
+| CPU %                        | avg, P50, P95, P99, max, min |
+| Available Memory Bytes       | avg, P50, P95, P99, max, min |
+| Disk Read / Write Bytes/sec  | avg, P50, P95, P99, max, min |
+| Disk Read / Write IOPS       | avg, P50, P95, P99, max, min |
+| Network In / Out Total Bytes | avg, P50, P95, P99, max, min |
 
 > **Note:** These are Azure fabric platform metrics — not VM Insights, Log Analytics,
 > Datadog, or Splunk. They work on every VM regardless of agent installation. Additional

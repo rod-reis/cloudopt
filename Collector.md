@@ -142,24 +142,6 @@ Aliases recognised: `[tenant]`, `[subscriptions]`, `[regions]`,
 
 ---
 
-## Subscriptions file (`--subscriptions-file`)
-
-Plain text file with one subscription ID per line. Lines starting with `#` are comments.
-
-```
-# Production
-aaaa-1111-...
-bbbb-2222-...
-
-# Dev / Test
-cccc-3333-...
-```
-
-> When using `--subscriptions-file`, pass `--regions` and `--metrics-days` on the
-> command line as usual — they apply to all subscriptions in the file.
-
----
-
 ## Region filter
 
 Use ARM region names (all lowercase, no spaces):
@@ -246,13 +228,13 @@ regardless of OS type or agent installation state.
 > VM Insights (AMA), Datadog, or Splunk will be added as separate optional
 > collectors in future releases.
 
-| Metric                        | Description                                          |
-| ----------------------------- | ---------------------------------------------------- |
-| CPU % (avg / P50 / P95 / max) | Host-level CPU from Azure Monitor platform telemetry |
-| Available Memory Bytes        | Free physical memory (host counter)                  |
-| Disk Read / Write Bytes/sec   | Storage throughput                                   |
-| Disk Read / Write IOPS        | Storage operations per second                        |
-| Network In / Out Total Bytes  | Network throughput                                   |
+| Metric                                    | Description                                          |
+| ----------------------------------------- | ---------------------------------------------------- |
+| CPU % (avg / P50 / P95 / P99 / max / min) | Host-level CPU from Azure Monitor platform telemetry |
+| Available Memory Bytes                    | Free physical memory (host counter)                  |
+| Disk Read / Write Bytes/sec               | Storage throughput                                   |
+| Disk Read / Write IOPS                    | Storage operations per second                        |
+| Network In / Out Total Bytes              | Network throughput                                   |
 
 Also collected: VM inventory (SKU, vCPUs, memory, region, zones, OS image, power state,
 disk layout, NIC count, VMSS / availability-set membership).

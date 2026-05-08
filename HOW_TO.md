@@ -96,13 +96,13 @@ cloudopt dashboard --data output/cloudopt_report.xlsx
 
 ## Commands
 
-| Command              | Who runs it | Description                                          | Reference                    |
-| -------------------- | ----------- | ---------------------------------------------------- | ---------------------------- |
-| `cloudopt collect`   | Customer    | Collect inventory + metrics + quota + Advisor → JSON | [COLLECTOR.md](COLLECTOR.md) |
-| `cloudopt analyze`   | Engineer    | Generate Excel workbook from JSON                    | [ANALYZER.md](ANALYZER.md)   |
-| `cloudopt dashboard` | Engineer    | Launch local web dashboard from the workbook         | [ANALYZER.md](ANALYZER.md)   |
-| `cloudopt export`    | Engineer    | Re-export workbook to JSON or CSV                    | [ANALYZER.md](ANALYZER.md)   |
-| `cloudopt version`   | Anyone      | Print installed version                              |                              |
+| Command              | Who runs it                         | Description                                          | Reference                    |
+| -------------------- | ----------------------------------- | ---------------------------------------------------- | ---------------------------- |
+| `cloudopt collect`   | Architect/Engineer or Workload SMEs | Collect inventory + metrics + quota + Advisor → JSON | [COLLECTOR.md](COLLECTOR.md) |
+| `cloudopt analyze`   | Architect/Engineer                  | Generate Excel workbook from JSON                    | [ANALYZER.md](ANALYZER.md)   |
+| `cloudopt dashboard` | Architect/Engineer                  | Launch local web dashboard from the workbook         | [ANALYZER.md](ANALYZER.md)   |
+| `cloudopt export`    | Architect/Engineer                  | Re-export workbook to JSON or CSV                    | [ANALYZER.md](ANALYZER.md)   |
+| `cloudopt version`   | Anyone                              | Print installed version                              |                              |
 
 ---
 
