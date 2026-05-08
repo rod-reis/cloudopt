@@ -108,17 +108,18 @@ class TestVmInventory:
         assert vm.owner is None
         assert vm.custom is None
 
-    def test_csa_editable_fields(self):
+    def test_analyst_editable_fields(self):
         vm = self._make_vm(
             workload="SAP",
             application="Finance App",
             environment="Production",
             criticality="High",
             owner="team-infra",
-            custom_notes="Maintenance window: Sunday 2am",
+            custom="Maintenance window: Sunday 2am",
         )
         assert vm.workload == "SAP"
         assert vm.environment == "Production"
+        assert vm.custom == "Maintenance window: Sunday 2am"
 
     def test_masked_subscription_id(self):
         vm = self._make_vm()
@@ -148,7 +149,7 @@ class TestVmRecommendation:
             resource_id="/subscriptions/a1b2c3d4-ef56-7890-abcd-ef1234567890/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm",
             current_sku="Standard_D4s_v3",
             category="underutilized",
-            reason="Low CPU and memory utilisation",
+            reason="Low CPU and memory utilization",
         )
         defaults.update(kwargs)
         return VmRecommendation(**defaults)
@@ -182,11 +183,13 @@ class TestVmMetrics:
             avg=25.0,
             p50=23.0,
             p95=55.0,
+            p99=42.0,
             max=88.0,
             min=2.0,
             time_series=[DailyDataPoint(date="2026-04-01T00:00:00Z", value=25.0)],
         )
         assert m.avg == pytest.approx(25.0)
+        assert m.p99 == pytest.approx(42.0)
         assert len(m.time_series) == 1
         assert m.time_series[0].date == "2026-04-01T00:00:00Z"
 

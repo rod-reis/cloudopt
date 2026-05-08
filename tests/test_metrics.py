@@ -31,6 +31,11 @@ class TestPercentile:
         result = _percentile(data, 95)
         assert result == pytest.approx(95.05, abs=1.0)
 
+    def test_p99_upper_tail(self):
+        data = list(range(1, 101, 1))  # 1..100
+        result = _percentile(data, 99)
+        assert result == pytest.approx(99.01, abs=1.0)
+
     def test_p0_minimum(self):
         data = [5.0, 10.0, 15.0]
         assert _percentile(data, 0) == pytest.approx(5.0)

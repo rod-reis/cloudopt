@@ -4,7 +4,7 @@ Covers:
   * Quota tier mapping (15 / 25 / 75 / 85)
   * Cross-subscription SKU-transfer suggestions
   * Legacy / previous-generation SKU filter
-  * Priority + CSA-review note + new column fields on every auto rec
+  * Priority + architect-review note + new column fields on every auto rec
 """
 
 from __future__ import annotations
@@ -26,7 +26,8 @@ from cloudopt.analyzer.recommendations import (
 )
 from cloudopt.analyzer.sku_catalog import SkuCatalog, SkuSpec
 from cloudopt.models import (
-    CSA_REVIEW_NOTE,
+    ARCHITECT_REVIEW_NOTE,
+    CSA_REVIEW_NOTE,  # backward-compat alias
     CollectionThresholds,
     QuotaItem,
     RecommendationCategory as Cat,
@@ -227,28 +228,28 @@ class TestLegacySkuFilter:
 
 
 # ---------------------------------------------------------------------------
-# Common contract: every auto-rec carries CSA review note + priority
+# Common contract: every auto-rec carries architect review note + priority
 # ---------------------------------------------------------------------------
 
 class TestRecommendationContract:
-    def test_quota_rec_has_csa_note_and_priority(self):
+    def test_quota_rec_has_architect_note_and_priority(self):
         recs = generate_quota_recommendations([_quota(90), _quota(20)])
-        assert all(r.notes == CSA_REVIEW_NOTE for r in recs)
+        assert all(r.notes == ARCHITECT_REVIEW_NOTE for r in recs)
         assert all(r.priority in {Pri.CRITICAL, Pri.HIGH, Pri.MEDIUM, Pri.LOW} for r in recs)
         assert all(r.recommendation for r in recs)
 
-    def test_xsub_rec_has_csa_note_and_priority(self):
+    def test_xsub_rec_has_architect_note_and_priority(self):
         donor = _quota(15, sub="D", sub_id="dddd-1111-1111-1111-111111111111")
         receiver = _quota(85, sub="R", sub_id="rrrr-1111-1111-1111-111111111111")
         recs = generate_cross_subscription_transfer_recommendations([donor, receiver])
-        assert recs and all(r.notes == CSA_REVIEW_NOTE for r in recs)
+        assert recs and all(r.notes == ARCHITECT_REVIEW_NOTE for r in recs)
         assert all(r.priority == Pri.HIGH for r in recs)
 
     def test_default_notes_field_on_blank_recommendation(self):
-        # The model itself defaults notes to CSA_REVIEW_NOTE so even
+        # The model itself defaults notes to ARCHITECT_REVIEW_NOTE so even
         # hand-built rows ship with the marker.
         r = VmRecommendation()
-        assert r.notes == CSA_REVIEW_NOTE
+        assert r.notes == ARCHITECT_REVIEW_NOTE
 
 
 # ---------------------------------------------------------------------------
@@ -267,3 +268,55 @@ class TestSortRecommendations:
         assert [r.priority for r in ordered] == [
             Pri.CRITICAL, Pri.HIGH, Pri.MEDIUM, Pri.LOW,
         ]
+
+
+# ---------------------------------------------------------------------------
+# D. RESOURCE_CLEANUP — deallocated VM detection
+# ---------------------------------------------------------------------------
+
+def _make_deallocated_vm() -> VmInventory:
+    return VmInventory(
+        vm_name="stopped-vm",
+        subscription_id="aaaa-1111-1111-1111-111111111111",
+        subscription_name="Sub-A",
+        resource_group="rg",
+        resource_id="/subscriptions/aaaa-1111-1111-1111-111111111111/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/stopped-vm",
+        vm_sku="Standard_D2s_v5",
+        vcpus=2,
+        memory_gb=8.0,
+        region="eastus",
+        os_type="Linux",
+        power_state="PowerState/deallocated",
+    )
+
+
+class TestResourceCleanup:
+    def test_deallocated_vm_emits_cleanup_rec(self):
+        catalog = MagicMock(spec=SkuCatalog)
+        vm = _make_deallocated_vm()
+        recs = generate_recommendations([vm], [], CollectionThresholds(), catalog)
+        cleanup = [r for r in recs if r.category == Cat.RESOURCE_CLEANUP]
+        assert len(cleanup) == 1
+        assert cleanup[0].subcategory == Cat.DECOMMISSION_CANDIDATE
+        assert cleanup[0].priority == Pri.HIGH
+        assert cleanup[0].notes == ARCHITECT_REVIEW_NOTE
+
+    def test_running_vm_does_not_emit_cleanup_rec(self):
+        catalog = MagicMock(spec=SkuCatalog)
+        catalog.find_smaller_sku.return_value = None
+        vm = VmInventory(
+            vm_name="running-vm",
+            subscription_id="aaaa-1111-1111-1111-111111111111",
+            subscription_name="Sub-A",
+            resource_group="rg",
+            resource_id="/subscriptions/aaaa-1111-1111-1111-111111111111/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/running-vm",
+            vm_sku="Standard_D2s_v5",
+            vcpus=2,
+            memory_gb=8.0,
+            region="eastus",
+            os_type="Linux",
+            power_state="PowerState/running",
+        )
+        recs = generate_recommendations([vm], [], CollectionThresholds(), catalog)
+        cleanup = [r for r in recs if r.category == Cat.RESOURCE_CLEANUP]
+        assert cleanup == []

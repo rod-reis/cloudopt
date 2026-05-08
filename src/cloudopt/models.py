@@ -99,7 +99,7 @@ class VmInventory(BaseModel):
     vmss_name: Optional[str] = None
     availability_set_name: Optional[str] = None
 
-    # CSA-editable annotation fields (blank by default, filled manually in Excel)
+    # Analyst-editable annotation fields (blank by default, filled manually in Excel)
     workload: Optional[str] = None
     application: Optional[str] = None
     environment: Optional[str] = None
@@ -110,7 +110,7 @@ class VmInventory(BaseModel):
     # Full ``properties`` payload as returned by Azure Resource Graph for the
     # resources table.  Stored verbatim so consumers have access to every
     # field exposed by ARG, even ones we do not promote to first-class
-    # columns.  Customer tag values are intentionally NOT carried here.
+    # columns.  Workload Owner tag values are intentionally NOT carried here.
     raw_properties: dict = Field(default_factory=dict)
 
     def masked_resource_id(self) -> str:
@@ -148,7 +148,7 @@ class VmMetrics(BaseModel):
 class RecommendationCategory(str):
     """Recommendation categories.
 
-    The CLOUDOPT model groups every finding into one of FIVE top-level umbrella
+    The CLOUDOPT model groups every finding into one of SIX top-level umbrella
     categories.  A more granular ``subcategory`` describes the specific
     signal (e.g. ``underutilized``) that fired the rule.
 
@@ -156,20 +156,23 @@ class RecommendationCategory(str):
       A. QUOTA_OPTIMIZATION       — quota tiers + cross-subscription transfer
       B. SKU_SWAP                 — same size, different family (CPU↔memory bound)
       C. RESIZING                 — same family, smaller (or larger) size
+      D. RESOURCE_CLEANUP         — deallocated / idle VMs to decommission
       E. MODERNIZATION            — legacy → modern SKU, IaaS → PaaS, etc.
       F. REGION_EXPANSION         — move workloads to Non-Prod / DR / new regions
 
     Subcategories (filled into ``VmRecommendation.subcategory``):
       underutilized | oversized | right-size | PaaS-candidate
+      decommission-candidate
       legacy-family | memory-bound | compute-bound
       quota-critical | quota-warning | quota-overprovisioned | quota-review
       cross-sub-transfer | cross-region-transfer
     """
 
-    # Top-level umbrella categories (5 buckets)
+    # Top-level umbrella categories (6 buckets)
     QUOTA_OPTIMIZATION = "Quota Optimization"
     SKU_SWAP = "SKU Swap Opportunities"
     RESIZING = "Resizing Opportunities"
+    RESOURCE_CLEANUP = "Resource Cleanup and Decommissioning"
     MODERNIZATION = "Modernization Candidates"
     REGION_EXPANSION = "Region Expansion / Growth Shaping"
 
@@ -187,6 +190,7 @@ class RecommendationCategory(str):
     QUOTA_WARNING = "quota-warning"
     QUOTA_OVERPROVISIONED = "quota-overprovisioned"
     QUOTA_REVIEW = "quota-review"
+    DECOMMISSION_CANDIDATE = "decommission-candidate"
     CROSS_SUB_TRANSFER = "cross-sub-transfer"
     CROSS_REGION_TRANSFER = "cross-region-transfer"
 
@@ -204,9 +208,10 @@ class OverrideStatus(str):
     DEFER = "defer"
 
 
-# Default note added to every auto-generated recommendation so the CSA
-# always knows the row was machine-produced and needs a human pass.
-CSA_REVIEW_NOTE = "CSA to review"
+# Default note added to every auto-generated recommendation so the
+# architect/engineer always knows the row was machine-produced and needs a human pass.
+ARCHITECT_REVIEW_NOTE = "Architect/Engineer to review"
+CSA_REVIEW_NOTE = ARCHITECT_REVIEW_NOTE  # backward-compat alias
 
 
 class VmRecommendation(BaseModel):
@@ -248,9 +253,9 @@ class VmRecommendation(BaseModel):
     reason: str = ""
     estimated_optimization: str = ""       # free-form: "~50% vCPU reduction", "Avoid quota block", …
 
-    # Editable by CSA
+    # Analyst-editable
     manual_override: Optional[str] = None  # OverrideStatus value
-    notes: Optional[str] = CSA_REVIEW_NOTE
+    notes: Optional[str] = ARCHITECT_REVIEW_NOTE
 
     # Back-compat — older code/tests still set this directly
     estimated_savings_pct: Optional[float] = None
@@ -329,6 +334,7 @@ class AppInsightsMetrics(BaseModel):
     avg: Optional[float] = None
     p50: Optional[float] = None
     p95: Optional[float] = None
+    p99: Optional[float] = None
     max: Optional[float] = None
     min: Optional[float] = None
     time_series: list[DailyDataPoint] = Field(default_factory=list)
@@ -369,7 +375,7 @@ class AdvisorRecommendation(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Workload Information (CSA-collected from the customer)
+# Workload Information
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
@@ -389,7 +395,7 @@ class SubscriptionZoneMapping(BaseModel):
 
 
 class WorkloadInfo(BaseModel):
-    """Free-form workload context the CSA fills in with the customer.
+    """Free-form workload context collected with the Workload Owner/SMEs.
 
     Rendered as a two-column table in the Excel workbook.  All fields
     default to empty strings so the worksheet ships ready to be filled in.
@@ -404,6 +410,5 @@ class WorkloadInfo(BaseModel):
     sla: str = ""
     rpo: str = ""
     rto: str = ""
-    challenge_1: str = ""
     challenge_2: str = ""
     challenge_3: str = ""

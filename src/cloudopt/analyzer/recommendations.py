@@ -1,17 +1,18 @@
 """Unified CLOUDOPT recommendation engine.
 
 Workload-level (parent-resource) aggregation + a single unified telemetry
-evaluation pass that maps signals onto five umbrella categories:
+evaluation pass that maps signals onto six umbrella categories:
 
     A. QUOTA_OPTIMIZATION       — quota tiers
     B. SKU_SWAP                 — same size, different family
     C. RESIZING                 — same family, smaller / larger size
+    D. RESOURCE_CLEANUP         — deallocated / idle VMs to decommission
     E. MODERNIZATION            — legacy → modern, IaaS → PaaS
     F. REGION_EXPANSION         — re-distribute workloads across subs / regions
 
 Each emitted ``VmRecommendation`` carries the umbrella in ``category`` and
 the granular signal in ``subcategory`` (e.g. ``underutilized``,
-``memory-bound``, ``quota-critical``).  Notes default to "CSA to review".
+``memory-bound``, ``quota-critical``).  Notes default to "Architect/Engineer to review".
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ from typing import Optional
 
 from cloudopt.analyzer.sku_catalog import SkuCatalog
 from cloudopt.models import (
-    CSA_REVIEW_NOTE,
+    ARCHITECT_REVIEW_NOTE,
     CollectionThresholds,
     QuotaItem,
     RecommendationCategory as Cat,
@@ -167,6 +168,33 @@ def _evaluate_workload(
     thresholds: CollectionThresholds,
     sku_catalog: SkuCatalog,
 ) -> list[VmRecommendation]:
+    out: list[VmRecommendation] = []
+
+    # D. RESOURCE_CLEANUP — deallocated VMs flagged before the metric early-return
+    deallocated = [
+        m for m in group.members
+        if (m.power_state or "").lower() == "powerstate/deallocated"
+    ]
+    if deallocated:
+        out.append(
+            _make_rec(
+                group=group,
+                priority=Pri.HIGH,
+                title="Review deallocated VM(s) for decommissioning",
+                umbrella=Cat.RESOURCE_CLEANUP,
+                subcategory=Cat.DECOMMISSION_CANDIDATE,
+                current_sku=group.representative_sku,
+                recommended_sku=None,
+                reason=(
+                    f"{len(deallocated)} of {len(group.members)} VM(s) in this workload "
+                    "are in a deallocated (stopped) state. Review whether these can be "
+                    "permanently decommissioned to free compute quota and reduce "
+                    "management overhead."
+                ),
+                optimization="Reclaim quota; eliminate ongoing management overhead",
+            )
+        )
+
     cpu_avgs: list[float] = []
     cpu_p95s: list[float] = []
     mem_pcts: list[float] = []
@@ -184,13 +212,13 @@ def _evaluate_workload(
             cpu_avgs.append(cpu_avg)
         if cpu_p95 is not None:
             cpu_p95s.append(cpu_p95)
-        mem_pct = _mem_utilisation_pct(mem_avail, vm.memory_gb)
+        mem_pct = _mem_utilization_pct(mem_avail, vm.memory_gb)
         if mem_pct is not None:
             mem_pcts.append(mem_pct)
         disk_iops_totals.append(disk_r + disk_w)
 
     if not cpu_avgs and not cpu_p95s and not mem_pcts:
-        return []
+        return out  # May include RESOURCE_CLEANUP recs for fully-deallocated groups
 
     cpu_avg = _mean(cpu_avgs)
     cpu_p95 = max(cpu_p95s) if cpu_p95s else None
@@ -202,7 +230,6 @@ def _evaluate_workload(
     vcpus = group.representative_vcpus
     memory_gb = group.representative_memory_gb
 
-    out: list[VmRecommendation] = []
     size_recommendation_emitted = False
 
     # C. RESIZING — underutilized
@@ -228,14 +255,14 @@ def _evaluate_workload(
             _make_rec(
                 group=group,
                 priority=Pri.HIGH,
-                title="Right-size or decommission underutilised workload",
+                title="Right-size or decommission underutilized workload",
                 umbrella=Cat.RESIZING,
                 subcategory=Cat.UNDERUTILIZED,
                 current_sku=sku,
                 recommended_sku=recommended,
                 reason=(
                     f"Avg CPU {cpu_avg:.1f}% < {thresholds.underutilized_cpu_avg}% threshold; "
-                    f"avg memory utilisation {mem_pct_avg:.1f}% < "
+                    f"avg memory utilization {mem_pct_avg:.1f}% < "
                     f"{thresholds.underutilized_memory_avg}% threshold. "
                     "Consider a smaller SKU or decommissioning."
                 ),
@@ -386,7 +413,7 @@ def generate_quota_recommendations(
         if q.utilization_pct >= QUOTA_CRITICAL_PCT:
             priority = Pri.CRITICAL
             subcategory = Cat.QUOTA_CRITICAL
-            title = "Quota at critical utilisation \u2014 request increase immediately"
+            title = "Quota at critical utilization \u2014 request increase immediately"
             reason = (
                 f"{q.display_name} in {q.region} is at {q.utilization_pct:.1f}% "
                 f"({q.current_usage}/{q.quota_limit}) \u2014 new deployments will start to fail."
@@ -451,7 +478,7 @@ def generate_quota_recommendations(
                 recommended_sku=None,
                 reason=reason,
                 estimated_optimization=optimization,
-                notes=CSA_REVIEW_NOTE,
+                notes=ARCHITECT_REVIEW_NOTE,
             )
         )
 
@@ -516,7 +543,7 @@ def generate_cross_subscription_transfer_recommendations(
                         "to balance regional capacity."
                     ),
                     estimated_optimization=f"~{spare} units of head-room available",
-                    notes=CSA_REVIEW_NOTE,
+                    notes=ARCHITECT_REVIEW_NOTE,
                 )
             )
 
@@ -569,7 +596,7 @@ def generate_cross_subscription_transfer_recommendations(
                         "workloads in those regions, or expanding the workload footprint."
                     ),
                     estimated_optimization=f"~{spare} units of head-room available cross-region",
-                    notes=CSA_REVIEW_NOTE,
+                    notes=ARCHITECT_REVIEW_NOTE,
                 )
             )
 
@@ -694,7 +721,7 @@ def _make_rec(
         ),
         estimated_optimization=optimization,
         estimated_savings_pct=savings_pct,
-        notes=CSA_REVIEW_NOTE,
+        notes=ARCHITECT_REVIEW_NOTE,
     )
 
 
@@ -712,7 +739,7 @@ def _stat(vm_met: dict[str, VmMetrics], metric_name: str, stat: str) -> Optional
     return getattr(m, stat, None)
 
 
-def _mem_utilisation_pct(avail_bytes: Optional[float], total_gb: float) -> Optional[float]:
+def _mem_utilization_pct(avail_bytes: Optional[float], total_gb: float) -> Optional[float]:
     if avail_bytes is None or total_gb <= 0:
         return None
     avail_gb = avail_bytes / (1024 ** 3)
@@ -745,30 +772,4 @@ def _savings_label(pct: Optional[float]) -> str:
     if pct is None or pct <= 0:
         return "Capacity / cost reduction (qualitative)"
     return f"~{pct:.0f}% vCPU reduction"
-"""Unified CLOUDOPT recommendation engine.
-
-This module replaces the original per-VM rule pipeline with a **workload-level**
-unified evaluation pass.  Rather than emitting one row per VM, the engine
-groups VMs by their parent resource (VMSS, Availability Set, Databricks
-cluster, AVD host pool, …) and emits ONE recommendation per workload group,
-covering one or more of the five CLOUDOPT categories:
-
-    A. QUOTA_OPTIMIZATION       — quota tiers + cross-subscription transfer
-    B. SKU_SWAP                 — same size, different family (CPU↔memory bound)
-    C. RESIZING                 — same family, smaller (or larger) size
-    E. MODERNIZATION            — legacy → modern SKU, IaaS → PaaS, …
-    F. REGION_EXPANSION         — re-distribute workloads to other regions
-                                   (Non-Prod / DR / additional region)
-
-Per-workload telemetry interpretation runs ONCE; the resulting signals are
-then mapped onto the five umbrella categories.  Each emitted row carries:
-
-    * priority    (critical | high | medium | low)
-    * category    (one of the 5 umbrella values)
-    * subcategory (granular signal — "underutilized", "memory-bound", …)
-    * notes       — defaults to "CSA to review"
-
-Auto-recommendations never propose legacy / previous-generation VM
-families (general purpose: only v4 and later).
-"""
 

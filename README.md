@@ -199,7 +199,8 @@ See [HOW_TO.md](HOW_TO.md) for full option reference.
 
 - **Inventory**: resource ID, subscription, resource group, region, zone, SKU, vCPUs,
   memory, OS type, OS image, disk layout, NIC count, power state, VMSS / availability-set
-- **Metrics** (30-day default, configurable 1–90 days):
+- **Platform metrics** (30-day default, configurable 1–90 days) — sourced from the
+  **Azure Monitor Metrics API** (host-level, no guest agent or VM Insights required):
 
 | Metric                       | Stats              |
 | ---------------------------- | ------------------ |
@@ -208,6 +209,10 @@ See [HOW_TO.md](HOW_TO.md) for full option reference.
 | Disk Read / Write Bytes/sec  | avg, P50, P95, max |
 | Disk Read / Write IOPS       | avg, P50, P95, max |
 | Network In / Out Total Bytes | avg, P50, P95, max |
+
+> **Note:** These are Azure fabric platform metrics — not VM Insights, Log Analytics,
+> Datadog, or Splunk. They work on every VM regardless of agent installation. Additional
+> metric sources will be added as separate collectors in future releases.
 
 ### Application Insights
 
@@ -218,7 +223,7 @@ JVM metrics (heap, GC, threads) via Log Analytics for workspace-linked component
 
 SKU-change and right-sizing recommendations from the Advisor resource graph.
 
-### Quota Utilisation
+### Quota Utilization
 
 Compute core quota usage per subscription + region, flagged when ≥ 80 % (configurable).
 
@@ -293,12 +298,12 @@ pytest tests/test_metrics.py             # single file
 
 ## Documentation
 
-| Guide                        | Purpose                                                                        |
-| ---------------------------- | ------------------------------------------------------------------------------ |
-| [HOW_TO.md](HOW_TO.md)       | Installation, authentication, quick start, command overview                    |
-| [COLLECTOR.md](COLLECTOR.md) | Full `collect` reference — options, scope files, thresholds, what is collected |
+| Guide                        | Purpose                                                                          |
+| ---------------------------- | -------------------------------------------------------------------------------- |
+| [HOW_TO.md](HOW_TO.md)       | Installation, authentication, quick start, command overview                      |
+| [COLLECTOR.md](COLLECTOR.md) | Full `collect` reference — options, scope files, thresholds, what is collected   |
 | [ANALYZER.md](ANALYZER.md)   | Excel generation, dashboard, export, workbook structure, analyst-editable fields |
-| [REPORTER.md](REPORTER.md)   | Final report generation from the analyzed workbook *(coming soon)*             |
+| [REPORTER.md](REPORTER.md)   | Final report generation from the analyzed workbook *(coming soon)*               |
 
 ---
 

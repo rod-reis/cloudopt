@@ -1,17 +1,18 @@
 """Multi-sheet Excel workbook generation using openpyxl.
 
 Sheet layout (11 sheets):
-  1. VM Inventory
-  2. Performance Summary
-  3. SKU Perf by Subscription
-  4. SKU Perf by Resource Group
-  5. SKU Perf by VMSS
-  6. SKU Perf by Availability Set
-  7. Optimizations
-  8. Quota Utilisation
-  9. Raw Metrics
-  10. Collection Metadata
-  11. SubscriptionsZoneMapping
+  1. Workload Information
+  2. Quota Utilization
+  3. VM Inventory
+  4. Performance Summary
+  5. SKU Perf by Subscription
+  6. SKU Perf by Resource Group
+  7. SKU Perf by VMSS
+  8. SKU Perf by Availability Set
+  9. Optimizations
+  10. Raw Metrics
+  11. Collection Metadata
+  12. SubscriptionsZoneMapping
 """
 
 from __future__ import annotations
@@ -54,7 +55,7 @@ from cloudopt.models import (
 _HDR_FILL = PatternFill("solid", fgColor="1F4E79")      # dark blue header
 _HDR_FONT = Font(color="FFFFFF", bold=True, size=10)
 _ALT_FILL = PatternFill("solid", fgColor="D6E4F0")      # alternating row
-_CSA_FILL = PatternFill("solid", fgColor="BDD7EE")      # CSA-editable column
+_CSA_FILL = PatternFill("solid", fgColor="BDD7EE")      # Analyst-editable column
 _GREEN_FILL = PatternFill("solid", fgColor="C6EFCE")
 _YELLOW_FILL = PatternFill("solid", fgColor="FFEB9C")
 _RED_FILL = PatternFill("solid", fgColor="FFC7CE")
@@ -91,6 +92,7 @@ def write_workbook(
     metrics_by_vm = _group_metrics(metrics)
 
     _sheet_workload_info(wb, workload_info or WorkloadInfo())
+    _sheet_quota(wb, quota or [])
     _sheet_inventory(wb, vms)
     _sheet_perf_summary(wb, vms, metrics_by_vm)
     _sheet_sku_flat(
@@ -116,7 +118,6 @@ def write_workbook(
     )
     _sheet_recommendations(wb, recommendations)
     _sheet_advisor(wb, advisor or [])
-    _sheet_quota(wb, quota or [])
     _sheet_raw_metrics(wb, metrics)
     _sheet_appinsights(wb, appinsights or [], appinsights_metrics or [])
     _sheet_zone_mapping(wb, zone_mappings or [])
@@ -128,7 +129,7 @@ def write_workbook(
 def read_workbook(path: Path) -> tuple[list[VmInventory], list[VmMetrics], list[VmRecommendation], CollectionMetadata]:
     """Read an existing workbook back into model objects.
 
-    CSA-edited fields (workload, application, environment, criticality, owner,
+    Analyst-edited fields (workload, application, environment, criticality, owner,
     custom, manual_override, notes) are preserved from the file.
     """
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
@@ -140,7 +141,7 @@ def read_workbook(path: Path) -> tuple[list[VmInventory], list[VmMetrics], list[
 
 
 def read_quota_from_workbook(path: Path) -> list[QuotaItem]:
-    """Read the Quota Utilisation sheet from an existing workbook."""
+    """Read the Quota Utilization sheet from an existing workbook."""
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     return _read_quota_sheet(wb)
 
@@ -173,7 +174,7 @@ _INVENTORY_COLS: list[tuple[str, str, int]] = [
     ("VMSS Name", "vmss_name", 24),
     ("Availability Set", "availability_set_name", 24),
     ("Resource ID", "masked_resource_id", 80),
-    # CSA-editable (light blue)
+    # Analyst-editable (light blue)
     ("Workload", "workload", 18),
     ("Application", "application", 18),
     ("Environment", "environment", 16),
@@ -182,7 +183,7 @@ _INVENTORY_COLS: list[tuple[str, str, int]] = [
     ("Custom", "custom", 20),
 ]
 
-_CSA_START_COL = 23  # first CSA-editable column (1-indexed); shifts when columns added before it
+_CSA_START_COL = 23  # first analyst-editable column (1-indexed); shifts when columns added before it
 
 
 def _sheet_inventory(wb: Workbook, vms: list[VmInventory]) -> None:
@@ -279,8 +280,9 @@ def _sheet_perf_summary(
             if alt:
                 cell.fill = _ALT_FILL
 
-            # Colour-code CPU columns (Avg, P95, P99, Max, Min)
+            # Format and colour-code CPU % columns (Avg, P95, P99, Max, Min)
             if col_idx in (7, 8, 9, 10, 11) and value is not None:
+                cell.number_format = "0.00"
                 if value < 40:
                     cell.fill = _GREEN_FILL
                 elif value < 70:
@@ -359,7 +361,7 @@ def _sheet_sku_flat(
 # ---------------------------------------------------------------------------
 
 def _rec_action(rec: "VmRecommendation") -> str:
-    """Plain-English recommended action for the CSA to present to the customer."""
+    """Plain-English recommended action to present to the Workload Owner/SMEs."""
     if rec.category == "underutilized":
         if rec.recommended_sku:
             return f"Resize to {rec.recommended_sku} or decommission if unused"
@@ -377,7 +379,7 @@ def _rec_action(rec: "VmRecommendation") -> str:
 # Sheet 7: Optimizations
 # ---------------------------------------------------------------------------
 
-# Order matches the CSA-facing spec exactly:
+# Order matches the reporting spec exactly:
 #   Priority, Recommendation, Category, Subcategory, Resource ID, Members,
 #   Current SKU/Resource Type, Recommended SKU/Resource Type,
 #   Reason, Estimated Optimization, Override, Notes
@@ -473,7 +475,7 @@ def _sheet_recommendations(wb: Workbook, recommendations: list[VmRecommendation]
             prio_cell.font = font
             prio_cell.alignment = Alignment(horizontal="center", vertical="center")
 
-        # Override + Notes are CSA-editable (columns 11, 12)
+        # Override + Notes are analyst-editable (columns 11, 12)
         for col_idx in (11, 12):
             ws.cell(row=row_idx, column=col_idx).fill = _CSA_FILL
 
@@ -492,7 +494,7 @@ def _sheet_recommendations(wb: Workbook, recommendations: list[VmRecommendation]
 
 
 # ---------------------------------------------------------------------------
-# Sheet 8: Quota Utilisation
+# Sheet 2: Quota Utilization
 # ---------------------------------------------------------------------------
 
 _QUOTA_COLS = [
@@ -508,7 +510,7 @@ _QUOTA_COLS = [
 
 
 def _sheet_quota(wb: Workbook, quota_items: list[QuotaItem]) -> None:
-    ws = wb.create_sheet("Quota Utilisation")
+    ws = wb.create_sheet("Quota Utilization")
     headers = [c[0] for c in _QUOTA_COLS]
     _write_header(ws, headers)
     ws.freeze_panes = "A2"
@@ -548,9 +550,13 @@ def _sheet_quota(wb: Workbook, quota_items: list[QuotaItem]) -> None:
 
 
 def _read_quota_sheet(wb) -> list[QuotaItem]:
-    if "Quota Utilisation" not in wb.sheetnames:
+    # Support both old ("Quota Utilisation") and new ("Quota Utilization") sheet names
+    sheet_name = next(
+        (n for n in ("Quota Utilization", "Quota Utilisation") if n in wb.sheetnames), None
+    )
+    if sheet_name is None:
         return []
-    ws = wb["Quota Utilisation"]
+    ws = wb[sheet_name]
     rows = list(ws.iter_rows(values_only=True))
     if len(rows) < 2:
         return []
@@ -684,7 +690,7 @@ def _sheet_appinsights(
 
 
 # ---------------------------------------------------------------------------
-# Sheet 0: Workload Information (CSA fills in with the customer)
+# Sheet 0: Workload Information (filled in with Workload Owner/SMEs)
 # ---------------------------------------------------------------------------
 
 _WORKLOAD_ROWS: list[tuple[str, str]] = [
@@ -697,14 +703,13 @@ _WORKLOAD_ROWS: list[tuple[str, str]] = [
     ("SLA",                            "sla"),
     ("RPO",                            "rpo"),
     ("RTO",                            "rto"),
-    ("Top 1 Challenge/Pain point",     "challenge_1"),
     ("Top 2 Challenge/Pain point",     "challenge_2"),
     ("Top 3 Challenge/Pain point",     "challenge_3"),
 ]
 
 
 def _sheet_workload_info(wb: Workbook, info: WorkloadInfo) -> None:
-    """Two-column table for the CSA to capture workload context."""
+    """Two-column table for capturing workload context from the Workload Owner/SMEs."""
     ws = wb.create_sheet("Workload Information")
     ws.column_dimensions["A"].width = 36
     ws.column_dimensions["B"].width = 60
@@ -1008,8 +1013,9 @@ def _read_raw_metrics_sheet(wb) -> list[VmMetrics]:
                 avg=float(row[2]) if row[2] is not None else None,
                 p50=float(row[3]) if row[3] is not None else None,
                 p95=float(row[4]) if row[4] is not None else None,
-                max=float(row[5]) if row[5] is not None else None,
-                min=float(row[6]) if row[6] is not None else None,
+                p99=float(row[5]) if row[5] is not None else None,
+                max=float(row[6]) if row[6] is not None else None,
+                min=float(row[7]) if row[7] is not None else None,
                 time_series=[],
             ))
         except Exception:

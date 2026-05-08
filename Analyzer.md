@@ -123,8 +123,8 @@ The generated workbook contains the following sheets:
 | SKU Perf by Resource Group   | Metrics aggregated by resource group                                                                                                 |
 | SKU Perf by VMSS             | Metrics for VMSS-grouped VMs                                                                                                         |
 | SKU Perf by Availability Set | Metrics for availability-set VMs                                                                                                     |
-| **Optimizations**            | Analyst-authored right-sizing and migration findings (pre-populated from Azure Advisor; empty rows for manual additions)                 |
-| Quota Utilisation            | Core quota usage per subscription / region                                                                                           |
+| **Optimizations**            | Analyst-authored right-sizing and migration findings (pre-populated from Azure Advisor; empty rows for manual additions)             |
+| Quota Utilization            | Core quota usage per subscription / region                                                                                           |
 | Raw Metrics                  | Full daily time-series for every collected metric                                                                                    |
 | App Insights                 | Inventory + summarised metrics for all App Insights components                                                                       |
 | Collection Metadata          | Run timestamp, thresholds, subscription list                                                                                         |
@@ -154,7 +154,7 @@ before presenting findings to the customer:
 
 The **Optimizations** sheet is intentionally left blank during collection. It
 is the primary deliverable for an engagement — fill it in based on your
-analysis of the Performance Summary, Quota Utilisation, and Azure Advisor
+analysis of the Performance Summary, Quota Utilization, and Azure Advisor
 findings already captured in the workbook.
 
 Suggested columns to populate per finding:

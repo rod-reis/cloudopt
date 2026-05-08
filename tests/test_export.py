@@ -63,6 +63,7 @@ def _make_metrics(vms):
             avg=12.5,
             p50=11.0,
             p95=38.0,
+            p99=42.0,
             max=75.0,
             min=2.0,
             time_series=[DailyDataPoint(date="2026-04-01T00:00:00Z", value=12.5)],
@@ -111,7 +112,7 @@ class TestExcelRoundTrip:
         assert path.exists()
         assert path.stat().st_size > 0
 
-    def test_read_back_csa_fields(self, tmp_path):
+    def test_read_back_analyst_fields(self, tmp_path):
         path = tmp_path / "output.xlsx"
         vms = _make_vms()
         metrics = _make_metrics(vms)
@@ -142,6 +143,17 @@ class TestExcelRoundTrip:
         updated_vms, _, _, _ = read_workbook(path)
         assert len(updated_vms) == 2
 
+    def test_p99_survives_raw_metrics_roundtrip(self, tmp_path):
+        path = tmp_path / "output.xlsx"
+        vms = _make_vms()
+        metrics = _make_metrics(vms)  # p99=42.0
+        write_workbook(vms, metrics, [], _make_metadata(), path)
+        _, read_metrics, _, _ = read_workbook(path)
+        assert len(read_metrics) == 1
+        assert read_metrics[0].p99 == pytest.approx(42.0)
+        assert read_metrics[0].max == pytest.approx(75.0)
+        assert read_metrics[0].min == pytest.approx(2.0)
+
 
 # ---------------------------------------------------------------------------
 # JSON export — masking
@@ -170,6 +182,14 @@ class TestJsonExport:
         assert "a1b2c3d4-ef56-7890-abcd-ef1234567890" not in text
         # Masked prefix should appear
         assert "a1b2c3d4-xxxx" in text
+
+    def test_p99_in_metrics_json(self, tmp_path):
+        path = tmp_path / "output.json"
+        vms = _make_vms()
+        metrics = _make_metrics(vms)  # p99=42.0
+        write_json(vms, metrics, [], _make_metadata(), path)
+        data = json.loads(path.read_text())
+        assert data["metrics"][0]["p99"] == pytest.approx(42.0)
 
     def test_vm_names_not_masked(self, tmp_path):
         path = tmp_path / "output.json"

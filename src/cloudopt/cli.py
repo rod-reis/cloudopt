@@ -537,7 +537,7 @@ def collect(
         console.print("[dim]  No App Insights components found — skipping.[/dim]\n")
 
     # ── 7. Quota ─────────────────────────────────────────────────────────
-    console.print("[bold]Step 7:[/bold] Collecting quota utilisation…")
+    console.print("[bold]Step 7:[/bold] Collecting quota utilization…")
 
     # Quota covers ALL in-scope subscriptions — not only those with VMs.
     # When the scope file lists only [resourcegroups] (no [subscriptionids]),
@@ -660,18 +660,18 @@ def analyze(
 ) -> None:
     """Generate an Excel workbook from a collected JSON file.
 
-    Separates collection (run by the customer or via Cloud Shell) from
-    analysis (run by the Microsoft engineer with openpyxl installed locally).
+    Separates collection (run by the Workload Owner or via Cloud Shell) from
+    analysis (run by the engineer with openpyxl installed locally).
 
     Example workflow:
 
     \b
-        # Customer collects data (no Excel dependency required):
+        # Workload Owner collects data (no Excel dependency required):
         CLOUDOPT collect --config-file scope.txt
 
-        # Customer shares cloudopt_export_<timestamp>.json with the Microsoft engineer.
+        # Workload Owner shares cloudopt_export_<timestamp>.json with the engineer.
 
-        # MS engineer generates the workbook:
+        # Engineer generates the workbook:
         CLOUDOPT analyze --from cloudopt_export_<timestamp>.json
     """
     import json
@@ -856,7 +856,7 @@ def export(
 ) -> None:
     """Convert an existing Excel workbook to JSON and/or CSV.
 
-    Use this after editing the workbook (overrides, notes, CSA fields) to
+    Use this after editing the workbook (overrides, notes, analyst-editable fields) to
     produce a machine-readable version that reflects your changes.
     """
     from cloudopt.export.excel import read_workbook

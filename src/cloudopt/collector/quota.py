@@ -33,7 +33,7 @@ def collect_quota(
     vms_sub_regions: dict[str, set[str]] | None = None,
     quota_alert_pct: float = 80.0,
 ) -> list[QuotaItem]:
-    """Return compute quota utilisation for every (subscription, region) in scope.
+    """Return compute quota utilization for every (subscription, region) in scope.
 
     All subscriptions in the list are queried — not only those that contain
     VM inventory — so that empty subscriptions are still covered.

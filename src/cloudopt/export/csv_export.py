@@ -74,7 +74,7 @@ def _write_vm_inventory_csv(vms: list[VmInventory], path: Path) -> None:
 
 
 def _write_metrics_csv(metrics: list[VmMetrics], path: Path) -> None:
-    headers = ["resource_id", "metric_name", "avg", "p50", "p95", "max", "min", "data_points"]
+    headers = ["resource_id", "metric_name", "avg", "p50", "p95", "p99", "max", "min", "data_points"]
     with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=headers)
         writer.writeheader()
@@ -85,6 +85,7 @@ def _write_metrics_csv(metrics: list[VmMetrics], path: Path) -> None:
                 "avg": m.avg,
                 "p50": m.p50,
                 "p95": m.p95,
+                "p99": m.p99,
                 "max": m.max,
                 "min": m.min,
                 "data_points": len(m.time_series),

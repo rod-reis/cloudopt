@@ -2,7 +2,7 @@
 
 The **Collector** is the first phase of the cloudopt workflow. It runs on any machine
 with Azure access (including Azure Cloud Shell) and produces a single JSON file that
-captures VM inventory, performance metrics, quota utilisation, and Azure Advisor findings.
+captures VM inventory, performance metrics, quota utilization, and Azure Advisor findings.
 
 > **Read-only** — the collector never writes to Azure resources.  
 > **Cloud Shell compatible** — no Excel dependency; runs in Python 3.11+ environments.
@@ -18,7 +18,7 @@ cloudopt collect [OPTIONS]
 | Option                             | Default        | Description                                                                                                                                                     |
 | ---------------------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--tenant-id` / `-t`               | —              | Microsoft Entra tenant GUID. When set, only subscriptions in this tenant are used and the credential is pinned to it.                                           |
-| `--config-file` / `-c`             | —              | Scope configuration file (see [Scope file](#scope-file---config-file)). CLI flags override values loaded from the file.                                            |
+| `--config-file` / `-c`             | —              | Scope configuration file (see [Scope file](#scope-file---config-file)). CLI flags override values loaded from the file.                                         |
 | `--subscriptions` / `-s`           | all accessible | Subscription ID(s) — bare GUID **or** `/subscriptions/<guid>`. Repeatable.                                                                                      |
 | `--subscriptions-file` / `-f`      | —              | Path to a text file of subscription IDs (one per line).                                                                                                         |
 | `--regions` / `--locations` / `-r` | all regions    | ARM region name(s), e.g. `eastus`. Repeatable. **Global filter** — applied to inventory, App Insights, Advisor, and quota queries.                              |
@@ -235,13 +235,24 @@ The built-in `ThrottleManager` automatically halves concurrency and respects
 
 ### Azure Virtual Machines
 
-| Metric                        | Description                       |
-| ----------------------------- | --------------------------------- |
-| CPU % (avg / P50 / P95 / max) | Percentage CPU from Azure Monitor |
-| Available Memory Bytes        | Free physical memory              |
-| Disk Read / Write Bytes/sec   | Storage throughput                |
-| Disk Read / Write IOPS        | Storage operations per second     |
-| Network In / Out Total Bytes  | Network throughput                |
+VM performance data is collected from the **Azure Monitor Metrics API** as
+**host-level platform metrics** — the same counters visible under "Metrics" in
+the Azure portal for a VM resource.  **No guest agent, VM Insights extension,
+or Log Analytics workspace is required.** This means the tool works on every VM
+regardless of OS type or agent installation state.
+
+> **Scope of current metrics:** Because these are host-level counters, memory is
+> limited to a single `Available Memory Bytes` value. Richer sources such as
+> VM Insights (AMA), Datadog, or Splunk will be added as separate optional
+> collectors in future releases.
+
+| Metric                        | Description                                          |
+| ----------------------------- | ---------------------------------------------------- |
+| CPU % (avg / P50 / P95 / max) | Host-level CPU from Azure Monitor platform telemetry |
+| Available Memory Bytes        | Free physical memory (host counter)                  |
+| Disk Read / Write Bytes/sec   | Storage throughput                                   |
+| Disk Read / Write IOPS        | Storage operations per second                        |
+| Network In / Out Total Bytes  | Network throughput                                   |
 
 Also collected: VM inventory (SKU, vCPUs, memory, region, zones, OS image, power state,
 disk layout, NIC count, VMSS / availability-set membership).
@@ -276,10 +287,10 @@ failing the run.
 All Advisor recommendations in scope are collected and appear in the
 **Optimizations** sheet of the Excel workbook after running `cloudopt analyze`.
 
-### Quota Utilisation
+### Quota Utilization
 
 Compute core quota usage per subscription and region, included in the
-**Quota Utilisation** sheet of the workbook.
+**Quota Utilization** sheet of the workbook.
 
 ---
 

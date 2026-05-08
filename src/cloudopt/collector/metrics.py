@@ -1,6 +1,24 @@
-"""Async Azure Monitor metrics collection with throttling and checkpoint/resume.
+"""Async Azure Monitor **platform metrics** collection with throttling and checkpoint/resume.
 
-Collects CPU, memory, disk, and network metrics for each VM (and VMSS aggregate).
+Data source
+-----------
+All metrics are fetched from the **Azure Monitor Metrics API**
+(``/providers/microsoft.insights/metrics``) using ``azure-mgmt-monitor``.
+These are host-level platform metrics emitted automatically by the Azure fabric
+for every VM — **no guest agent, VM Insights, or Log Analytics workspace is
+required**.  They are the same counters visible in the Azure portal under
+"Metrics" for a VM resource.
+
+Tradeoffs vs. agent-based sources
+----------------------------------
+* Memory is limited to ``Available Memory Bytes`` (one host-side counter).
+  VM Insights / AMA would expose richer per-process and guest-OS memory detail.
+* No per-process, per-disk-partition, or application-level data.
+* Works on every VM regardless of OS type or agent installation state.
+
+Metrics collected: CPU %, Available Memory Bytes, Disk R/W Bytes/sec,
+Disk R/W IOPS, Network In/Out Total Bytes.
+
 Checkpoints every 500 VMs to allow resuming interrupted runs.
 """
 
