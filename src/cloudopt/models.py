@@ -2,7 +2,15 @@ from __future__ import annotations
 
 import re
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from cloudopt.analyzer.taxonomy import (
+    Category,
+    Confidence,
+    FindingType,
+    Readiness,
+    SubCategory,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -59,6 +67,42 @@ class CollectionThresholds(BaseModel):
     quota_alert_pct: float = Field(
         default=80.0,
         description="Quota utilization % at or above which a quota entry is flagged as an alert",
+    )
+    # --- new quota thresholds per SPEC §2.5 ---
+    quota_oversized_pct: float = Field(
+        default=20.0,
+        description=(
+            "30-day max utilization % below which quota is oversized"
+            " (only when quota > Azure default)."
+        ),
+    )
+    quota_warning_pct: float = Field(
+        default=70.0,
+        description="30-day max utilization % at which a quota warning is emitted.",
+    )
+    quota_critical_pct: float = Field(
+        default=85.0,
+        description="30-day max utilization % above which quota is critical.",
+    )
+    quota_window_days: int = Field(
+        default=30,
+        description="Measurement window in days for quota utilization.",
+    )
+    # --- §2.6 reservation / capacity-reservation thresholds ---
+    rsvp_underutilized_pct: float = Field(
+        default=80.0,
+        description="RI/SP utilization % below which RSV-UND-001 fires.",
+    )
+    rsvp_expiring_days: int = Field(
+        default=60,
+        description="Days to expiry at or below which RSV-EXP-001 fires.",
+    )
+    rsvp_uncovered_cpu_p95_pct: float = Field(
+        default=20.0,
+        description=(
+            "P95 CPU % above which a VM is considered steady-state"
+            " for RSV-UNC-001 (uncovered VM check)."
+        ),
     )
 
 
@@ -260,6 +304,14 @@ class VmRecommendation(BaseModel):
     # Back-compat — older code/tests still set this directly
     estimated_savings_pct: Optional[float] = None
 
+    # Data-source confidence — set by the recommendation engine
+    # Values: "platform-only" | "os-aware" | "workload-aware"
+    confidence: str = "platform-only"
+
+    # Human-readable evidence strings describing which metrics drove this
+    # recommendation (e.g. "Memory (OS agent): avg=78.4%, P95=92.1%").
+    evidence: list[str] = Field(default_factory=list)
+
     def masked_resource_id(self) -> str:
         return mask_subscription_ids_in_string(self.resource_id)
 
@@ -281,6 +333,9 @@ class QuotaItem(BaseModel):
     quota_limit: int
     utilization_pct: float  # 0–100
     alert: bool  # True if utilization_pct >= quota_alert_pct threshold
+    # Enriched quota-risk fields (populated by Activity Log query; None when unavailable)
+    peak_usage_pct_30d: Optional[float] = None   # highest observed utilisation % in last 30 d
+    allocation_failures_30d: int = 0              # count of AllocationFailed events in last 30 d
 
     def masked_subscription_id(self) -> str:
         return mask_subscription_id(self.subscription_id)
@@ -394,6 +449,36 @@ class SubscriptionZoneMapping(BaseModel):
     physical_zone_name: str
 
 
+# ---------------------------------------------------------------------------
+# Azure Resource Graph generic inventory
+# ---------------------------------------------------------------------------
+
+class AzureResource(BaseModel):
+    """One row from the ARG ``resources`` table (tags excluded)."""
+
+    resource_id: str
+    name: str
+    resource_type: str                      # e.g. microsoft.compute/virtualmachines
+    subscription_id: str
+    subscription_name: str
+    resource_group: str
+    location: str
+    kind: Optional[str] = None             # storage account kind, etc.
+    sku_name: Optional[str] = None
+    sku_tier: Optional[str] = None
+    plan_name: Optional[str] = None
+    plan_publisher: Optional[str] = None
+    plan_product: Optional[str] = None
+    zones: Optional[str] = None            # comma-separated zone list
+    managed_by: Optional[str] = None
+
+    def masked_resource_id(self) -> str:
+        return mask_subscription_ids_in_string(self.resource_id)
+
+    def masked_subscription_id(self) -> str:
+        return mask_subscription_id(self.subscription_id)
+
+
 class WorkloadInfo(BaseModel):
     """Free-form workload context collected with the Workload Owner/SMEs.
 
@@ -412,3 +497,186 @@ class WorkloadInfo(BaseModel):
     rto: str = ""
     challenge_2: str = ""
     challenge_3: str = ""
+
+
+# ---------------------------------------------------------------------------
+# Metric series models (SPEC §4.5 JSON schema sketch)
+# ---------------------------------------------------------------------------
+
+
+class MetricPoint(BaseModel):
+    """A single timestamped data point within a platform MetricSeries."""
+
+    t: str    # ISO 8601 timestamp (e.g. "2026-02-11T00:00:00Z")
+    v: float  # metric value
+
+
+class MetricSummary(BaseModel):
+    """Pre-aggregated summary carried by customer-supplied series (SPEC §4.5).
+
+    Platform series carry ``points``; customer series carry a ``summary``
+    because the monitoring tool pre-aggregates before export.
+    """
+
+    avg: Optional[float] = None
+    p95: Optional[float] = None
+    p99: Optional[float] = None
+    max: Optional[float] = None
+    min: Optional[float] = None
+
+
+class MetricSeries(BaseModel):
+    """One time-series for one metric on one VM (SPEC §4.5).
+
+    Platform series: ``source="platform"``, ``points`` populated, no ``summary``.
+    Customer series: ``source="customer"``, ``vendor`` set, ``summary`` populated,
+    ``points`` empty (pre-aggregated by the monitoring tool).
+    """
+
+    source: str          # "platform" | "ama" | "vminsights-classic" | "customer"
+    metric: str          # canonical metric name (e.g. "Percentage CPU")
+    aggregation: str     # "avg" | "max" | "min" | "p95" | "p99"
+    grain: str           # "PT1H" | "PT5M"
+    window_days: int
+    unit: str
+    vendor: Optional[str] = None                          # set for customer series
+    points: list[MetricPoint] = Field(default_factory=list)
+    summary: Optional[MetricSummary] = None
+
+
+# ---------------------------------------------------------------------------
+# Finding model (SPEC §6.1 — §6.2)
+# ---------------------------------------------------------------------------
+
+
+class Finding(BaseModel):
+    """A single optimization finding for a single VM.
+
+    Two subtypes (SPEC §6.2):
+    - ``recommendation``: tool asserts an action backed by evidence.
+      ``confidence`` is non-null; ``readiness`` is READY / LIKELY / INSUFFICIENT.
+    - ``candidate``: tool surfaces a possibility for human evaluation.
+      ``confidence`` is null; ``readiness`` is always DISCOVERY.
+
+    Every LOW/MEDIUM recommendation must populate ``blockers_to_high`` so the
+    customer knows what data to provide (SPEC §6.3).
+    """
+
+    vm_id: str
+    category: Category
+    subcategory: SubCategory
+    code: str                                               # e.g. "SWP-GEN-001"
+    finding_type: FindingType
+    current: Optional[str] = None                          # current SKU / tier
+    proposed: Optional[str] = None                         # proposed SKU / tier
+    deltas: dict = Field(default_factory=dict)             # vcpu, ram_gb, gen_gap …
+    evidence_sources: list[str] = Field(default_factory=list)
+    confidence: Optional[Confidence] = None                # null for candidates
+    readiness: Readiness
+    blockers_to_high: list[str] = Field(default_factory=list)
+    customer_inputs_needed: list[str] = Field(default_factory=list)
+    rationale: str = ""
+
+    @model_validator(mode="after")
+    def _validate_consistency(self) -> "Finding":
+        if self.finding_type is FindingType.CANDIDATE:
+            if self.confidence is not None:
+                raise ValueError(
+                    "candidate findings must have confidence=None"
+                )
+            if self.readiness is not Readiness.DISCOVERY:
+                raise ValueError(
+                    "candidate findings must have readiness=DISCOVERY"
+                )
+        else:  # RECOMMENDATION
+            if self.confidence is None:
+                raise ValueError(
+                    "recommendation findings must have a non-null confidence"
+                )
+            if (
+                self.confidence is not Confidence.HIGH
+                and not self.blockers_to_high
+            ):
+                raise ValueError(
+                    "blockers_to_high must be non-empty when confidence is"
+                    " not HIGH (SPEC §6.3)"
+                )
+        return self
+
+
+# ---------------------------------------------------------------------------
+# Reservations & Savings Plans (SPEC §2.6, §3.4)
+# ---------------------------------------------------------------------------
+
+class ReservationOrder(BaseModel):
+    """A single RI / Savings Plan reservation order (SPEC §3.4).
+
+    Counts, percentages, and dates only — no $ / cost fields (SPEC §1.2).
+    """
+
+    order_id: str                          # ARM resource ID (may span subscriptions)
+    display_name: str
+    term: str                              # e.g. P1Y | P3Y | P5Y
+    expiry_date: str                       # ISO 8601 date YYYY-MM-DD
+    sku_name: str                          # VM SKU covered by this order
+    region: str
+    reserved_count: int
+    applied_scope_type: str               # Shared | Single
+    applied_scope_ids: list[str] = Field(default_factory=list)  # subscription IDs
+    # Utilization from Microsoft.Consumption/reservationDetails (last 30 days).
+    # None when the Consumption API is unavailable or permissions are absent.
+    utilization_pct: Optional[float] = None  # 0–100
+
+    def masked_applied_scope_ids(self) -> list[str]:
+        """Return subscription IDs with internal UUIDs partially masked."""
+        return [mask_subscription_id(s) for s in self.applied_scope_ids]
+
+
+class CapacityReservationItem(BaseModel):
+    """One capacity-reservation entry within a CRG (SPEC §3.4).
+
+    Counts only — no $ / cost fields.
+    """
+
+    reservation_name: str
+    sku_name: str
+    reserved_count: int   # sku.capacity from ARM
+    used_count: int       # len(virtualMachinesAllocated) from ARM
+    zone: Optional[str] = None
+
+
+class CapacityReservationGroup(BaseModel):
+    """A Capacity Reservation Group and its member reservations (SPEC §3.4).
+
+    Counts and percentages only — no $ / cost fields.
+    """
+
+    group_id: str                          # full ARM resource ID
+    group_name: str
+    subscription_id: str
+    resource_group: str
+    region: str
+    zones: list[str] = Field(default_factory=list)
+    reservations: list[CapacityReservationItem] = Field(default_factory=list)
+
+    @property
+    def reserved_count_total(self) -> int:
+        return sum(r.reserved_count for r in self.reservations)
+
+    @property
+    def used_count_total(self) -> int:
+        return sum(r.used_count for r in self.reservations)
+
+    @property
+    def fill_rate_pct(self) -> Optional[float]:
+        """Fill rate as a percentage (0–100), or None when reserved_count is 0."""
+        total = self.reserved_count_total
+        if total == 0:
+            return None
+        return round(100.0 * self.used_count_total / total, 1)
+
+    def masked_subscription_id(self) -> str:
+        return mask_subscription_id(self.subscription_id)
+
+    def masked_group_id(self) -> str:
+        return mask_subscription_ids_in_string(self.group_id)

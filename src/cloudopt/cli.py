@@ -326,6 +326,7 @@ def collect(
     from cloudopt.collector.inventory import collect_inventory, count_resources_by_type
     from cloudopt.collector.metrics import collect_metrics
     from cloudopt.collector.quota import collect_quota, sub_regions_from_vms
+    from cloudopt.collector.resources import collect_resources
     from cloudopt.collector.zones import collect_zone_mappings
     from cloudopt.collector.appinsights import (
         collect_appinsights_inventory,
@@ -580,6 +581,13 @@ def collect(
         f"[green]✓[/green] {len(zone_maps)} zone mapping row(s) collected.\n"
     )
 
+    # ── 7d. Full resource inventory via Resource Graph ───────────────────
+    console.print("[bold]Step 7d:[/bold] Collecting full resource inventory via Resource Graph…")
+    all_resources = collect_resources(credential=credential, subscriptions=target_subs, scope=scope)
+    console.print(
+        f"[green]✓[/green] {len(all_resources)} resource(s) discovered.\n"
+    )
+
     # ── 8. Export ────────────────────────────────────────────────────────
     from cloudopt.models import (
         CollectionMetadata,
@@ -612,6 +620,7 @@ def collect(
         advisor=advisor_recs,
         workload_info=workload_info,
         zone_mappings=zone_maps,
+        resources=all_resources,
     )
 
     # Delete the checkpoint file now that data is safely written to JSON.
@@ -657,6 +666,20 @@ def analyze(
             ),
         ),
     ] = None,
+    monitoring: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--monitoring",
+            help=(
+                "Path to a monitoring CSV file in the canonical cloudopt format. "
+                "Enables OS-level and workload-aware recommendation confidence."
+            ),
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+        ),
+    ] = None,
 ) -> None:
     """Generate an Excel workbook from a collected JSON file.
 
@@ -675,6 +698,10 @@ def analyze(
         CLOUDOPT analyze --from cloudopt_export_<timestamp>.json
     """
     import json
+    from cloudopt.analyzer.recommendations import generate_recommendations
+    from cloudopt.analyzer.sku_catalog import OfflineSkuCatalog
+    from cloudopt.enrichment.loader import load_monitoring_csv
+    from cloudopt.enrichment.joiner import join_monitoring_data
     from cloudopt.export.excel import write_workbook
     from cloudopt.models import (
         AdvisorRecommendation,
@@ -779,6 +806,15 @@ def analyze(
         except Exception:
             pass
 
+    # --- Resource inventory -----------------------------------------------
+    from cloudopt.models import AzureResource as _AzureResource
+    resources_from_json: list[_AzureResource] = []
+    for d in raw.get("resources", []):
+        try:
+            resources_from_json.append(_AzureResource(**d))
+        except Exception:
+            pass
+
     # --- Metadata ----------------------------------------------------------
     meta_raw = raw.get("metadata", {})
     try:
@@ -808,6 +844,32 @@ def analyze(
         f"{len(quota)} quota entries, {len(appinsights)} App Insights component(s)."
     )
 
+    # --- Load monitoring enrichment data (optional) -----------------------
+    enriched_metrics = None
+    enrichment_summary = None
+    if monitoring:
+        console.print(f"Loading monitoring CSV from [cyan]{monitoring}[/cyan]…")
+        try:
+            data_points = load_monitoring_csv(monitoring)
+            enriched_metrics, enrichment_summary = join_monitoring_data(data_points, vms)
+            console.print(
+                f"  [green]✓[/green] {enrichment_summary.matched_vm_count} VM(s) enriched "
+                f"from {enrichment_summary.total_data_points} data points "
+                f"({enrichment_summary.unmatched_hostname_count} unmatched hostnames)."
+            )
+        except Exception as exc:
+            console.print(f"[yellow]Warning:[/yellow] Could not load monitoring CSV: {exc}")
+
+    # --- Generate recommendations -----------------------------------------
+    thresholds = metadata.thresholds
+    recommendations = generate_recommendations(
+        vms=vms,
+        metrics=metrics,
+        thresholds=thresholds,
+        sku_catalog=OfflineSkuCatalog(),
+        enriched_metrics=enriched_metrics or [],
+    )
+
     # --- Write workbook ----------------------------------------------------
     out_dir = output_dir or from_file.parent
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -825,6 +887,8 @@ def analyze(
         advisor=advisor,
         workload_info=workload_info,
         zone_mappings=zone_mappings,
+        enriched_metrics=enriched_metrics,
+        resources=resources_from_json,
     )
 
     console.rule("[bold green]Analysis complete[/bold green]")
@@ -832,6 +896,67 @@ def analyze(
     console.print(
         "\nStart the dashboard with: [bold]CLOUDOPT dashboard "
         f"--data {xlsx_path}[/bold]\n"
+    )
+
+
+# ---------------------------------------------------------------------------
+# export-hosts
+# ---------------------------------------------------------------------------
+
+@app.command(name="export-hosts")
+def export_hosts(
+    from_file: Annotated[
+        Path,
+        typer.Option(
+            "--from",
+            help="Path to the JSON file produced by the 'collect' command.",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+        ),
+    ],
+    output: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--output",
+            "-o",
+            help="Output CSV path. Defaults to cloudopt_hosts.csv in the JSON directory.",
+        ),
+    ] = None,
+) -> None:
+    """Export VM hostnames to CSV for use with monitoring query packs.
+
+    Example:
+
+    \b
+        cloudopt export-hosts --from cloudopt_export_<ts>.json
+        cloudopt export-hosts --from cloudopt_export_<ts>.json --output hosts.csv
+    """
+    import json
+    from cloudopt.export.host_list import write_host_list
+    from cloudopt.models import VmInventory
+
+    console.print(f"Reading [cyan]{from_file}[/cyan]…")
+    try:
+        raw = json.loads(from_file.read_text(encoding="utf-8"))
+    except Exception as exc:
+        console.print(f"[red]Error:[/red] Could not read JSON file: {exc}")
+        raise typer.Exit(code=1)
+
+    vms: list[VmInventory] = []
+    for d in raw.get("vms", []):
+        try:
+            vms.append(VmInventory(**{k: v for k, v in d.items() if k != "subscription_id"},
+                                   subscription_id=d.get("subscription_id", "")))
+        except Exception:
+            pass
+
+    out_path = output or (from_file.parent / "cloudopt_hosts.csv")
+    write_host_list(vms, out_path)
+    console.print(f"  [green]✓[/green] {len(vms)} VM(s) written to [cyan]{out_path}[/cyan]")
+    console.print(
+        "\nShare this CSV with your monitoring team to generate the enrichment CSV."
     )
 
 

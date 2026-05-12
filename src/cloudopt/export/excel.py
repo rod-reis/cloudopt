@@ -1,6 +1,6 @@
 """Multi-sheet Excel workbook generation using openpyxl.
 
-Sheet layout (11 sheets):
+Sheet layout (13 sheets):
   1. Workload Information
   2. Quota Utilization
   3. VM Inventory
@@ -13,6 +13,7 @@ Sheet layout (11 sheets):
   10. Raw Metrics
   11. Collection Metadata
   12. SubscriptionsZoneMapping
+  13. Inventory              ← full ARG resource inventory (new)
 """
 
 from __future__ import annotations
@@ -34,12 +35,16 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.table import Table, TableStyleInfo
 from openpyxl.worksheet.worksheet import Worksheet
 
+from cloudopt.enrichment.schema import EnrichedVmMetrics
 from cloudopt.models import (
     AdvisorRecommendation,
     AppInsightsInventory,
     AppInsightsMetrics,
+    AzureResource,
+    CapacityReservationGroup,
     CollectionMetadata,
     QuotaItem,
+    ReservationOrder,
     SubscriptionZoneMapping,
     VmInventory,
     VmMetrics,
@@ -83,6 +88,10 @@ def write_workbook(
     advisor: list[AdvisorRecommendation] | None = None,
     workload_info: WorkloadInfo | None = None,
     zone_mappings: list[SubscriptionZoneMapping] | None = None,
+    enriched_metrics: list[EnrichedVmMetrics] | None = None,
+    resources: list[AzureResource] | None = None,
+    reservations: list[ReservationOrder] | None = None,
+    capacity_reservations: list[CapacityReservationGroup] | None = None,
 ) -> None:
     """Write the full Excel workbook to *path*."""
     wb = Workbook()
@@ -120,6 +129,11 @@ def write_workbook(
     _sheet_raw_metrics(wb, metrics)
     _sheet_appinsights(wb, appinsights or [], appinsights_metrics or [])
     _sheet_zone_mapping(wb, zone_mappings or [])
+    if enriched_metrics:
+        _sheet_monitoring_data(wb, enriched_metrics)
+    _sheet_resources(wb, resources or [])
+    _sheet_reservations(wb, reservations or [])
+    _sheet_capacity_reservations(wb, capacity_reservations or [])
     _sheet_metadata(wb, metadata)
 
     wb.save(path)
@@ -382,7 +396,7 @@ def _rec_action(rec: "VmRecommendation") -> str:
 # Order matches the reporting spec exactly:
 #   Priority, Recommendation, Category, Subcategory, Resource ID, Members,
 #   Current SKU/Resource Type, Recommended SKU/Resource Type,
-#   Reason, Estimated Optimization, Override, Notes
+#   Reason, Estimated Optimization, Override, Notes, Confidence, Evidence
 _REC_COLS = [
     ("Priority", 12),
     ("Recommendation", 42),
@@ -396,6 +410,8 @@ _REC_COLS = [
     ("Estimated Optimization", 28),
     ("Override", 14),
     ("Notes", 24),
+    ("Confidence", 18),
+    ("Evidence", 52),
 ]
 
 _PRIORITY_FILLS = {
@@ -454,6 +470,8 @@ def _sheet_recommendations(wb: Workbook, recommendations: list[VmRecommendation]
             rec.estimated_optimization,
             rec.manual_override or "",
             rec.notes or "",
+            rec.confidence,
+            " | ".join(rec.evidence) if rec.evidence else "",
         ]
         for col_idx, val in enumerate(row_data, start=1):
             cell = ws.cell(row=row_idx, column=col_idx, value=val)
@@ -461,7 +479,7 @@ def _sheet_recommendations(wb: Workbook, recommendations: list[VmRecommendation]
             cell.font = Font(size=9)
             cell.alignment = Alignment(
                 vertical="top",
-                wrap_text=col_idx in (2, 9, 10, 12),
+                wrap_text=col_idx in (2, 9, 10, 12, 14),
             )
             if alt:
                 cell.fill = _ALT_FILL
@@ -478,6 +496,13 @@ def _sheet_recommendations(wb: Workbook, recommendations: list[VmRecommendation]
         # Override + Notes are analyst-editable (columns 11, 12)
         for col_idx in (11, 12):
             ws.cell(row=row_idx, column=col_idx).fill = _CSA_FILL
+
+        # Confidence column (13) — colour-coded by tier
+        conf_cell = ws.cell(row=row_idx, column=13)
+        if rec.confidence == "workload-aware":
+            conf_cell.fill = _GREEN_FILL
+        elif rec.confidence == "os-aware":
+            conf_cell.fill = _YELLOW_FILL
 
     # Register the DataValidation only if there are rows; set sqref as a
     # compact Excel range (e.g. "K2:K101") — NOT per-cell space-separated
@@ -505,6 +530,8 @@ _QUOTA_COLS = [
     ("Current Usage", 14),
     ("Quota Limit", 14),
     ("Utilization %", 14),
+    ("30d Peak %", 12),
+    ("Alloc. Failures (30d)", 22),
     ("Alert", 8),
 ]
 
@@ -526,6 +553,8 @@ def _sheet_quota(wb: Workbook, quota_items: list[QuotaItem]) -> None:
             item.current_usage,
             item.quota_limit,
             item.utilization_pct,
+            item.peak_usage_pct_30d,
+            item.allocation_failures_30d if item.allocation_failures_30d else "",
             "YES" if item.alert else "",
         ]
         for col_idx, val in enumerate(row_data, start=1):
@@ -535,12 +564,18 @@ def _sheet_quota(wb: Workbook, quota_items: list[QuotaItem]) -> None:
             cell.alignment = Alignment(vertical="top")
             if item.alert:
                 cell.fill = _RED_FILL
+            elif item.allocation_failures_30d > 0 and col_idx == 9:
+                cell.fill = _RED_FILL
             elif alt:
                 cell.fill = _ALT_FILL
-        # Colour-code utilization % cell
+        # Colour-code utilization % cell (col 7)
         util_cell = ws.cell(row=row_idx, column=7)
         if not item.alert:  # only recolour if not already red
             _colour_util(util_cell, item.utilization_pct)
+        # Colour-code peak usage % cell (col 8)
+        peak_cell = ws.cell(row=row_idx, column=8)
+        if item.peak_usage_pct_30d is not None and not item.alert:
+            _colour_util(peak_cell, item.peak_usage_pct_30d)
 
     for col_idx, (_, width) in enumerate(_QUOTA_COLS, start=1):
         ws.column_dimensions[get_column_letter(col_idx)].width = width
@@ -560,12 +595,25 @@ def _read_quota_sheet(wb) -> list[QuotaItem]:
     rows = list(ws.iter_rows(values_only=True))
     if len(rows) < 2:
         return []
+    # Detect column layout (10-col new vs 8-col legacy)
+    header = [str(c or "").strip() for c in rows[0]]
+    has_peak = "30d Peak %" in header
+    has_failures = "Alloc. Failures (30d)" in header
     items: list[QuotaItem] = []
     for row in rows[1:]:
         if not any(row):
             continue
         try:
-            alert_val = str(row[7] or "").upper()
+            if has_peak and has_failures:
+                # New 10-column layout
+                alert_val = str(row[9] or "").upper()
+                peak = float(row[7]) if row[7] is not None else None
+                failures = int(row[8] or 0)
+            else:
+                # Legacy 8-column layout
+                alert_val = str(row[7] or "").upper()
+                peak = None
+                failures = 0
             items.append(
                 QuotaItem(
                     subscription_id="",
@@ -577,6 +625,8 @@ def _read_quota_sheet(wb) -> list[QuotaItem]:
                     quota_limit=int(row[5] or 0),
                     utilization_pct=float(row[6] or 0),
                     alert=(alert_val == "YES"),
+                    peak_usage_pct_30d=peak,
+                    allocation_failures_30d=failures,
                 )
             )
         except Exception:
@@ -848,6 +898,134 @@ def _sheet_zone_mapping(
         _add_table(ws, "TblZoneMapping", len(zone_mappings))
 
 
+# Sheet 13: Monitoring Data
+# ---------------------------------------------------------------------------
+
+_MONITORING_COLS = [
+    ("VM Name", 28),
+    ("Source Tool", 16),
+    ("Metric Group", 16),
+    ("Metric Name", 34),
+    ("Avg Value", 12),
+    ("P95 Value", 12),
+    ("Max Value", 12),
+    ("Unit", 14),
+    ("Confidence", 18),
+]
+
+
+def _sheet_monitoring_data(
+    wb: Workbook,
+    enriched_metrics: list[EnrichedVmMetrics],
+) -> None:
+    """Write monitoring data in tall format — one row per metric per VM."""
+    from cloudopt.enrichment.schema import METRIC_GROUPS
+
+    ws = wb.create_sheet("Monitoring Data")
+    headers = [c[0] for c in _MONITORING_COLS]
+    _write_header(ws, headers)
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}1"
+
+    # Build reverse mapping: metric_name → group
+    metric_to_group: dict[str, str] = {}
+    for group_name, metric_names in METRIC_GROUPS.items():
+        for mn in metric_names:
+            metric_to_group[mn] = group_name
+
+    row_idx = 2
+    for enriched in enriched_metrics:
+        for dp in enriched.data_points:
+            alt = row_idx % 2 == 0
+            group_name = metric_to_group.get(dp.metric_name, "other")
+            row_data = [
+                enriched.vm_name,
+                dp.source_tool,
+                group_name,
+                dp.metric_name,
+                dp.avg_value,
+                dp.p95_value,
+                dp.max_value,
+                dp.unit,
+                enriched.confidence_tier,
+            ]
+            for col_idx, val in enumerate(row_data, start=1):
+                cell = ws.cell(row=row_idx, column=col_idx, value=val)
+                cell.border = _THIN_BORDER
+                cell.font = Font(size=9)
+                cell.alignment = Alignment(vertical="top")
+                if alt:
+                    cell.fill = _ALT_FILL
+            # Confidence column colour
+            conf_cell = ws.cell(row=row_idx, column=9)
+            if enriched.confidence_tier == "workload-aware":
+                conf_cell.fill = _GREEN_FILL
+            elif enriched.confidence_tier == "os-aware":
+                conf_cell.fill = _YELLOW_FILL
+            row_idx += 1
+
+    for col_idx, (_, width) in enumerate(_MONITORING_COLS, start=1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+    row_count = row_idx - 2
+    if row_count > 0:
+        _add_table(ws, "TblMonitoringData", row_count)
+
+
+# ---------------------------------------------------------------------------
+# Sheet 13: Inventory (full ARG resource list, tags excluded)
+# ---------------------------------------------------------------------------
+
+_RESOURCES_COLS: list[tuple[str, str, int]] = [
+    # (header, field_name_or_special, width)
+    ("Name", "name", 36),
+    ("Type", "resource_type", 52),
+    ("Resource Group", "resource_group", 28),
+    ("Subscription", "subscription_name", 30),
+    ("Subscription ID", "masked_subscription_id", 42),
+    ("Region", "location", 16),
+    ("Kind", "kind", 20),
+    ("SKU Name", "sku_name", 22),
+    ("SKU Tier", "sku_tier", 16),
+    ("Plan Name", "plan_name", 22),
+    ("Plan Publisher", "plan_publisher", 22),
+    ("Plan Product", "plan_product", 22),
+    ("Zones", "zones", 12),
+    ("Managed By", "managed_by", 50),
+    ("Resource ID", "masked_resource_id", 80),
+]
+
+
+def _sheet_resources(wb: Workbook, resources: list[AzureResource]) -> None:
+    ws = wb.create_sheet("Inventory")
+    headers = [c[0] for c in _RESOURCES_COLS]
+    _write_header(ws, headers)
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}1"
+
+    for row_idx, resource in enumerate(resources, start=2):
+        alt = row_idx % 2 == 0
+        for col_idx, (_, field, _) in enumerate(_RESOURCES_COLS, start=1):
+            if field == "masked_resource_id":
+                val: Any = resource.masked_resource_id()
+            elif field == "masked_subscription_id":
+                val = resource.masked_subscription_id()
+            else:
+                val = getattr(resource, field, None) or ""
+            cell = ws.cell(row=row_idx, column=col_idx, value=val)
+            cell.border = _THIN_BORDER
+            cell.font = Font(size=9)
+            cell.alignment = Alignment(vertical="top", wrap_text=False)
+            if alt:
+                cell.fill = _ALT_FILL
+
+    for col_idx, (_, _, width) in enumerate(_RESOURCES_COLS, start=1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+    if resources:
+        _add_table(ws, "TblInventory_ARG", len(resources))
+
+
 # Sheet 12: Collection Metadata
 # ---------------------------------------------------------------------------
 
@@ -926,6 +1104,147 @@ def _sheet_metadata(wb: Workbook, metadata: CollectionMetadata) -> None:
             r_cell.fill = _CHECKED_FILL
         m_cell.font = Font(size=9, bold=checked)
         r_cell.font = Font(size=9)
+
+
+# ---------------------------------------------------------------------------
+# Sheet: Reservations (RI / Savings Plans — counts, dates, percentages only)
+# No $ / cost columns anywhere (SPEC §1.2).
+# ---------------------------------------------------------------------------
+
+_RSV_COLS: list[tuple[str, int]] = [
+    ("Order ID (masked)",      40),
+    ("Display Name",           35),
+    ("SKU",                    22),
+    ("Region",                 18),
+    ("Term",                   10),
+    ("Expiry Date",            14),
+    ("Reserved Count",         16),
+    ("Applied Scope Type",     20),
+    ("Utilization (%)",        16),
+]
+
+
+def _sheet_reservations(wb: Workbook, reservations: list[ReservationOrder]) -> None:
+    ws = wb.create_sheet("Reservations")
+
+    # Header row
+    for col_idx, (label, _) in enumerate(_RSV_COLS, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=label)
+        cell.fill = _HDR_FILL
+        cell.font = _HDR_FONT
+        cell.alignment = Alignment(horizontal="left")
+        cell.border = _THIN_BORDER
+
+    for row_idx, r in enumerate(reservations, start=2):
+        vals: list[Any] = [
+            r.masked_applied_scope_ids()[0] if r.applied_scope_ids else r.order_id,
+            r.display_name,
+            r.sku_name,
+            r.region,
+            r.term,
+            r.expiry_date,
+            r.reserved_count,
+            r.applied_scope_type,
+            r.utilization_pct,
+        ]
+        alt = row_idx % 2 == 0
+        for col_idx, val in enumerate(vals, start=1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=val)
+            cell.border = _THIN_BORDER
+            cell.font = Font(size=9)
+            cell.alignment = Alignment(vertical="top", wrap_text=False)
+            if alt:
+                cell.fill = _ALT_FILL
+
+    for col_idx, (_, width) in enumerate(_RSV_COLS, start=1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+    if reservations:
+        _add_table(ws, "TblReservations", len(reservations))
+
+
+# ---------------------------------------------------------------------------
+# Sheet: Capacity Reservations (CRGs — counts and fill rates only)
+# No $ / cost columns anywhere (SPEC §1.2).
+# ---------------------------------------------------------------------------
+
+_CRG_COLS: list[tuple[str, int]] = [
+    ("Group Name",             28),
+    ("Subscription (masked)",  36),
+    ("Region",                 18),
+    ("Zones",                  14),
+    ("Reservation Name",       28),
+    ("SKU",                    22),
+    ("Reserved Count",         16),
+    ("Used Count",             14),
+    ("Fill Rate (%)",          14),
+]
+
+
+def _sheet_capacity_reservations(
+    wb: Workbook,
+    capacity_reservations: list[CapacityReservationGroup],
+) -> None:
+    ws = wb.create_sheet("Capacity Reservations")
+
+    # Header row
+    for col_idx, (label, _) in enumerate(_CRG_COLS, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=label)
+        cell.fill = _HDR_FILL
+        cell.font = _HDR_FONT
+        cell.alignment = Alignment(horizontal="left")
+        cell.border = _THIN_BORDER
+
+    row_idx = 2
+    for crg in capacity_reservations:
+        zones_str = ", ".join(crg.zones) if crg.zones else ""
+        masked_sub = crg.masked_subscription_id()
+        if crg.reservations:
+            for item in crg.reservations:
+                fill_pct: float | None = None
+                if item.reserved_count > 0:
+                    fill_pct = round(100.0 * item.used_count / item.reserved_count, 1)
+                vals: list[Any] = [
+                    crg.group_name,
+                    masked_sub,
+                    crg.region,
+                    zones_str,
+                    item.reservation_name,
+                    item.sku_name,
+                    item.reserved_count,
+                    item.used_count,
+                    fill_pct,
+                ]
+                alt = row_idx % 2 == 0
+                for col_idx, val in enumerate(vals, start=1):
+                    cell = ws.cell(row=row_idx, column=col_idx, value=val)
+                    cell.border = _THIN_BORDER
+                    cell.font = Font(size=9)
+                    cell.alignment = Alignment(vertical="top", wrap_text=False)
+                    if alt:
+                        cell.fill = _ALT_FILL
+                row_idx += 1
+        else:
+            # CRG with no reservations — emit one summary row
+            vals = [
+                crg.group_name, masked_sub, crg.region, zones_str,
+                "", "", 0, 0, None,
+            ]
+            alt = row_idx % 2 == 0
+            for col_idx, val in enumerate(vals, start=1):
+                cell = ws.cell(row=row_idx, column=col_idx, value=val)
+                cell.border = _THIN_BORDER
+                cell.font = Font(size=9)
+                if alt:
+                    cell.fill = _ALT_FILL
+            row_idx += 1
+
+    for col_idx, (_, width) in enumerate(_CRG_COLS, start=1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+    last_data_row = row_idx - 2  # last filled row
+    if last_data_row >= 1:
+        _add_table(ws, "TblCapacityReservations", last_data_row)
 
 
 # ---------------------------------------------------------------------------

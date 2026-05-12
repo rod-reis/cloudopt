@@ -5,12 +5,16 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from cloudopt.enrichment.schema import EnrichedVmMetrics, EnrichmentSummary
 from cloudopt.models import (
     AdvisorRecommendation,
     AppInsightsInventory,
     AppInsightsMetrics,
+    AzureResource,
+    CapacityReservationGroup,
     CollectionMetadata,
     QuotaItem,
+    ReservationOrder,
     SubscriptionZoneMapping,
     VmInventory,
     VmMetrics,
@@ -34,9 +38,14 @@ def write_json(
     advisor: list[AdvisorRecommendation] | None = None,
     workload_info: WorkloadInfo | None = None,
     zone_mappings: list[SubscriptionZoneMapping] | None = None,
+    enriched_metrics: list[EnrichedVmMetrics] | None = None,
+    enrichment_summary: EnrichmentSummary | None = None,
+    resources: list[AzureResource] | None = None,
+    reservations: list[ReservationOrder] | None = None,
+    capacity_reservations: list[CapacityReservationGroup] | None = None,
 ) -> None:
     """Write all collection data to a JSON file at *path*."""
-    payload = {
+    payload: dict = {
         "metadata": _metadata_dict(metadata),
         "workload_info": (workload_info or WorkloadInfo()).model_dump(),
         "vms": [_vm_dict(vm) for vm in vms],
@@ -47,7 +56,15 @@ def write_json(
         "appinsights": [_ai_dict(c) for c in (appinsights or [])],
         "appinsights_metrics": [_ai_metrics_dict(m) for m in (appinsights_metrics or [])],
         "zone_mappings": [_zone_mapping_dict(z) for z in (zone_mappings or [])],
+        "resources": [_resource_dict(r) for r in (resources or [])],
+        "reservations": [_reservation_dict(r) for r in (reservations or [])],
+        "capacity_reservations": [_crg_dict(c) for c in (capacity_reservations or [])],
     }
+    if enriched_metrics is not None:
+        payload["enrichment"] = {
+            "summary": enrichment_summary.model_dump() if enrichment_summary else None,
+            "vm_metrics": [_enriched_vm_dict(e) for e in enriched_metrics],
+        }
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
@@ -161,7 +178,29 @@ def _quota_dict(q: QuotaItem) -> dict:
         "current_usage": q.current_usage,
         "quota_limit": q.quota_limit,
         "utilization_pct": q.utilization_pct,
+        "peak_usage_pct_30d": q.peak_usage_pct_30d,
+        "allocation_failures_30d": q.allocation_failures_30d,
         "alert": q.alert,
+    }
+
+
+def _resource_dict(r: AzureResource) -> dict:
+    return {
+        "resource_id": r.masked_resource_id(),
+        "name": r.name,
+        "resource_type": r.resource_type,
+        "subscription_id": r.masked_subscription_id(),
+        "subscription_name": r.subscription_name,
+        "resource_group": r.resource_group,
+        "location": r.location,
+        "kind": r.kind,
+        "sku_name": r.sku_name,
+        "sku_tier": r.sku_tier,
+        "plan_name": r.plan_name,
+        "plan_publisher": r.plan_publisher,
+        "plan_product": r.plan_product,
+        "zones": r.zones,
+        "managed_by": r.managed_by,
     }
 
 
@@ -205,4 +244,67 @@ def _zone_mapping_dict(z: SubscriptionZoneMapping) -> dict:
         "logical_zone": z.logical_zone,
         "physical_zone": z.physical_zone,
         "physical_zone_name": z.physical_zone_name,
+    }
+
+
+def _enriched_vm_dict(e: EnrichedVmMetrics) -> dict:
+    return {
+        "vm_name": e.vm_name,
+        "confidence_tier": e.confidence_tier,
+        "data_points": [
+            {
+                "source_tool": dp.source_tool,
+                "hostname": dp.hostname,
+                "metric_name": dp.metric_name,
+                "period_days": dp.period_days,
+                "period_end_utc": dp.period_end_utc,
+                "avg_value": dp.avg_value,
+                "p95_value": dp.p95_value,
+                "max_value": dp.max_value,
+                "unit": dp.unit,
+                "text_value": dp.text_value,
+            }
+            for dp in e.data_points
+        ],
+    }
+
+
+def _reservation_dict(r: ReservationOrder) -> dict:
+    """Serialise a ReservationOrder — counts, percentages, dates; no $ fields."""
+    return {
+        "order_id": mask_subscription_ids_in_string(r.order_id),
+        "display_name": r.display_name,
+        "term": r.term,
+        "expiry_date": r.expiry_date,
+        "sku_name": r.sku_name,
+        "region": r.region,
+        "reserved_count": r.reserved_count,
+        "applied_scope_type": r.applied_scope_type,
+        "applied_scope_ids": r.masked_applied_scope_ids(),
+        "utilization_pct": r.utilization_pct,
+    }
+
+
+def _crg_dict(c: CapacityReservationGroup) -> dict:
+    """Serialise a CapacityReservationGroup — counts and metadata; no $ fields."""
+    return {
+        "group_id": c.masked_group_id(),
+        "group_name": c.group_name,
+        "subscription_id": c.masked_subscription_id(),
+        "resource_group": c.resource_group,
+        "region": c.region,
+        "zones": c.zones,
+        "reserved_count_total": c.reserved_count_total,
+        "used_count_total": c.used_count_total,
+        "fill_rate_pct": c.fill_rate_pct,
+        "reservations": [
+            {
+                "reservation_name": item.reservation_name,
+                "sku_name": item.sku_name,
+                "reserved_count": item.reserved_count,
+                "used_count": item.used_count,
+                "zone": item.zone,
+            }
+            for item in c.reservations
+        ],
     }

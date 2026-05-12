@@ -47,6 +47,9 @@ dmypy.json
 # ruff / linting
 .ruff_cache/
 
+# temp data
+temp/*
+
 # Output data — NEVER commit customer data
 output/
 output-*/
@@ -55,6 +58,7 @@ output-*/
 *.csv
 !scope.example.txt
 CLAUDE.md
+SPEC.md
 
 # IDE & AI assistant configuration (not part of the public tool)
 .vscode/
@@ -64,6 +68,7 @@ CLAUDE.md
 .claude/*
 .vscode/*
 .github/copilot-instructions.md
+
 
 # OS
 .DS_Store

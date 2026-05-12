@@ -33,6 +33,8 @@ _DATA: dict[str, Any] = {
     "quota": [],
     "metadata": None,
     "path": None,
+    "reservations": [],
+    "capacity_reservations": [],
 }
 
 
@@ -135,6 +137,50 @@ def create_app(data_path: Path) -> FastAPI:
             for q in items
         ]
 
+    @app.get("/api/reservations")
+    async def reservations_view():
+        from cloudopt.models import mask_subscription_id
+        result = []
+        for r in _DATA["reservations"]:
+            result.append({
+                "order_id": r.masked_applied_scope_ids()[0] if r.applied_scope_ids else r.order_id,
+                "display_name": r.display_name,
+                "sku_name": r.sku_name,
+                "region": r.region,
+                "term": r.term,
+                "expiry_date": r.expiry_date,
+                "reserved_count": r.reserved_count,
+                "applied_scope_type": r.applied_scope_type,
+                "utilization_pct": r.utilization_pct,
+            })
+        return result
+
+    @app.get("/api/capacity-reservations")
+    async def capacity_reservations_view():
+        result = []
+        for crg in _DATA["capacity_reservations"]:
+            result.append({
+                "group_name": crg.group_name,
+                "subscription_id": crg.masked_subscription_id(),
+                "group_id": crg.masked_group_id(),
+                "region": crg.region,
+                "zones": crg.zones,
+                "reserved_count_total": crg.reserved_count_total,
+                "used_count_total": crg.used_count_total,
+                "fill_rate_pct": crg.fill_rate_pct,
+                "reservations": [
+                    {
+                        "reservation_name": item.reservation_name,
+                        "sku_name": item.sku_name,
+                        "reserved_count": item.reserved_count,
+                        "used_count": item.used_count,
+                        "zone": item.zone,
+                    }
+                    for item in crg.reservations
+                ],
+            })
+        return result
+
     return app
 
 
@@ -199,6 +245,23 @@ def _load_json(path: Path) -> None:
 
     _store(vms, metrics, recommendations, metadata, [])
 
+    # --- Reservations ---
+    from cloudopt.models import ReservationOrder, CapacityReservationGroup
+    rsvp: list[ReservationOrder] = []
+    for d in raw.get("reservations", []):
+        try:
+            rsvp.append(ReservationOrder(**d))
+        except Exception:
+            pass
+    crg: list[CapacityReservationGroup] = []
+    for d in raw.get("capacity_reservations", []):
+        try:
+            crg.append(CapacityReservationGroup(**d))
+        except Exception:
+            pass
+    _DATA["reservations"] = rsvp
+    _DATA["capacity_reservations"] = crg
+
 
 def _store(vms, metrics, recommendations, metadata, quota=None) -> None:
     from cloudopt.export.excel import _group_metrics
@@ -207,6 +270,7 @@ def _store(vms, metrics, recommendations, metadata, quota=None) -> None:
     _DATA["recommendations"] = recommendations
     _DATA["quota"] = quota or []
     _DATA["metadata"] = metadata
+    # reservations and capacity_reservations are populated separately in _load_json
 
 
 # ---------------------------------------------------------------------------

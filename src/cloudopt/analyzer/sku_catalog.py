@@ -133,3 +133,31 @@ def _sku_family_prefix(sku_name: str) -> str:
             break
         prefix += ch
     return f"Standard_{prefix}" if prefix else sku_name
+
+
+class OfflineSkuCatalog:
+    """No-network SKU catalog for offline analysis (e.g., ``analyze`` command).
+
+    ``find_smaller_sku`` always returns ``None``; the recommendation engine
+    still emits recommendations — it just cannot name a specific target SKU.
+    Use this class when Azure credentials are unavailable (e.g., when running
+    analysis on an already-exported JSON file).
+    """
+
+    def get(
+        self,
+        subscription_id: str,
+        region: str,
+        sku_name: str,
+    ) -> None:
+        return None
+
+    def find_smaller_sku(
+        self,
+        subscription_id: str,
+        region: str,
+        current_sku: str,
+        required_vcpus: int,
+        required_memory_gb: float,
+    ) -> None:
+        return None

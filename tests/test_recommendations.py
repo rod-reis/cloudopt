@@ -156,7 +156,7 @@ class TestPaasRule:
         catalog.find_smaller_sku.return_value = None  # prevent right-size from triggering
         recs = generate_recommendations([vm], metrics, CollectionThresholds(), catalog)
         subs = [r.subcategory for r in recs]
-        assert PAAS_CANDIDATE in subs
+        assert PAAS_CANDIDATE not in subs  # PaaS detection removed per SPEC §13
 
     def test_no_flag_high_cpu(self):
         vm = _vm()
@@ -186,7 +186,10 @@ class TestEdgeCases:
         vm = _vm(zone=None, avset=None)
         catalog = MagicMock(spec=SkuCatalog)
         recs = generate_recommendations([vm], [], CollectionThresholds(), catalog)
-        assert recs == []  # no metrics → no CPU/mem data → no recommendations
+        # Metric-dependent rules (underutilized, right-size) must not fire with no metrics.
+        # Metadata-only rules (e.g. SWP-ARC-001) may still fire.
+        size_subs = {r.subcategory for r in recs if r.subcategory in (UNDERUTILIZED, RIGHT_SIZE)}
+        assert not size_subs, f"Metric-driven rules must not fire with no metrics, got: {size_subs}"
 
     def test_empty_vm_list(self):
         recs = generate_recommendations([], [], CollectionThresholds(), MagicMock())
