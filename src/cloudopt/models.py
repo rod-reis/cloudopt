@@ -680,3 +680,31 @@ class CapacityReservationGroup(BaseModel):
 
     def masked_group_id(self) -> str:
         return mask_subscription_ids_in_string(self.group_id)
+
+
+# ---------------------------------------------------------------------------
+# Deployment Failures (SPEC §3.5)
+# ---------------------------------------------------------------------------
+
+class DeploymentFailureEntry(BaseModel):
+    """A single Activity Log error entry bucketed by error class (SPEC §3.5).
+
+    No $ / cost fields — counts and timestamps only (SPEC §1.2).
+    """
+
+    resource_id: str
+    resource_name: str
+    resource_type: str   # lowercased provider/type, e.g. "microsoft.compute/virtualmachines"
+    subscription_id: str
+    resource_group: str
+    region: str
+    error_class: str     # "allocation" | "quota" | "image" | "other"
+    operation_name: str
+    status_message: str
+    timestamp: str       # ISO-8601 string (UTC)
+
+    def masked_resource_id(self) -> str:
+        return mask_subscription_ids_in_string(self.resource_id)
+
+    def masked_subscription_id(self) -> str:
+        return mask_subscription_id(self.subscription_id)

@@ -43,6 +43,7 @@ from cloudopt.models import (
     AzureResource,
     CapacityReservationGroup,
     CollectionMetadata,
+    DeploymentFailureEntry,
     QuotaItem,
     ReservationOrder,
     SubscriptionZoneMapping,
@@ -92,6 +93,7 @@ def write_workbook(
     resources: list[AzureResource] | None = None,
     reservations: list[ReservationOrder] | None = None,
     capacity_reservations: list[CapacityReservationGroup] | None = None,
+    deployment_failures: list[DeploymentFailureEntry] | None = None,
 ) -> None:
     """Write the full Excel workbook to *path*."""
     wb = Workbook()
@@ -134,6 +136,7 @@ def write_workbook(
     _sheet_resources(wb, resources or [])
     _sheet_reservations(wb, reservations or [])
     _sheet_capacity_reservations(wb, capacity_reservations or [])
+    _sheet_deployment_failures(wb, deployment_failures or [])
     _sheet_metadata(wb, metadata)
 
     wb.save(path)
@@ -1245,6 +1248,67 @@ def _sheet_capacity_reservations(
     last_data_row = row_idx - 2  # last filled row
     if last_data_row >= 1:
         _add_table(ws, "TblCapacityReservations", last_data_row)
+
+
+# ---------------------------------------------------------------------------
+# Sheet: Deployment Failures (SPEC §3.5 / §11.11)
+# ---------------------------------------------------------------------------
+
+_DEPFAIL_COLS: list[tuple[str, int]] = [
+    ("Resource Name",           28),
+    ("Resource Type",           36),
+    ("Subscription (masked)",   42),
+    ("Resource Group",          22),
+    ("Region",                  16),
+    ("Error Class",             16),
+    ("Operation Name",          40),
+    ("Timestamp",               22),
+    ("Status Message",          60),
+]
+
+
+def _sheet_deployment_failures(
+    wb: Workbook,
+    deployment_failures: list[DeploymentFailureEntry],
+) -> None:
+    ws = wb.create_sheet("Deployment Failures")
+
+    for col_idx, (label, _) in enumerate(_DEPFAIL_COLS, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=label)
+        cell.fill = _HDR_FILL
+        cell.font = _HDR_FONT
+        cell.alignment = Alignment(horizontal="left")
+        cell.border = _THIN_BORDER
+
+    row_idx = 2
+    for f in deployment_failures:
+        vals: list[Any] = [
+            f.resource_name,
+            f.resource_type,
+            f.masked_subscription_id(),
+            f.resource_group,
+            f.region,
+            f.error_class,
+            f.operation_name,
+            f.timestamp,
+            f.status_message,
+        ]
+        alt = row_idx % 2 == 0
+        for col_idx, val in enumerate(vals, start=1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=val)
+            cell.border = _THIN_BORDER
+            cell.font = Font(size=9)
+            cell.alignment = Alignment(vertical="top", wrap_text=False)
+            if alt:
+                cell.fill = _ALT_FILL
+        row_idx += 1
+
+    for col_idx, (_, width) in enumerate(_DEPFAIL_COLS, start=1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+    last_data_row = row_idx - 2
+    if last_data_row >= 1:
+        _add_table(ws, "TblDeploymentFailures", last_data_row)
 
 
 # ---------------------------------------------------------------------------

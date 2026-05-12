@@ -35,6 +35,7 @@ _DATA: dict[str, Any] = {
     "path": None,
     "reservations": [],
     "capacity_reservations": [],
+    "deployment_failures": [],
 }
 
 
@@ -181,6 +182,29 @@ def create_app(data_path: Path) -> FastAPI:
             })
         return result
 
+    @app.get("/api/deployment-failures")
+    async def deployment_failures_view(
+        error_class: str | None = Query(None),
+    ):
+        items = _DATA["deployment_failures"]
+        if error_class:
+            items = [f for f in items if f.error_class == error_class]
+        return [
+            {
+                "resource_id": f.masked_resource_id(),
+                "resource_name": f.resource_name,
+                "resource_type": f.resource_type,
+                "subscription_id": f.masked_subscription_id(),
+                "resource_group": f.resource_group,
+                "region": f.region,
+                "error_class": f.error_class,
+                "operation_name": f.operation_name,
+                "status_message": f.status_message,
+                "timestamp": f.timestamp,
+            }
+            for f in items
+        ]
+
     return app
 
 
@@ -261,6 +285,16 @@ def _load_json(path: Path) -> None:
             pass
     _DATA["reservations"] = rsvp
     _DATA["capacity_reservations"] = crg
+
+    # --- Deployment Failures ---
+    from cloudopt.models import DeploymentFailureEntry
+    depfail: list[DeploymentFailureEntry] = []
+    for d in raw.get("deployment_failures", []):
+        try:
+            depfail.append(DeploymentFailureEntry(**d))
+        except Exception:
+            pass
+    _DATA["deployment_failures"] = depfail
 
 
 def _store(vms, metrics, recommendations, metadata, quota=None) -> None:

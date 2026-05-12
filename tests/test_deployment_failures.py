@@ -20,12 +20,14 @@ SUB_ID = "a1b2c3d4-ef56-7890-abcd-ef1234567890"
 
 
 def _metadata() -> CollectionMetadata:
+    from cloudopt.models import CollectionThresholds
     return CollectionMetadata(
+        run_date="2026-05-12",
         tool_version="0.0.1",
-        collection_timestamp="2026-05-12T00:00:00Z",
-        subscription_count=1,
-        vm_count=0,
-        collection_errors=[],
+        subscriptions_scanned=[],
+        metrics_period_days=30,
+        total_vm_count=0,
+        thresholds=CollectionThresholds(),
     )
 
 
