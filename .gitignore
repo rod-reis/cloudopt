@@ -1,79 +1,143 @@
+# =============================================================================
 # Python
+# =============================================================================
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
+MANIFEST
+
+# Build / packaging artifacts
 build/
 develop-eggs/
 dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
 parts/
 sdist/
 var/
 wheels/
 share/python-wheels/
 *.egg-info/
-.installed.cfg
 *.egg
-MANIFEST
+*.whl
+.installed.cfg
 
 # Virtual environments
 .venv/
 .venv-*/
 venv/
-ENV/
+venv.bak/
 env/
 env.bak/
-venv.bak/
+ENV/
+# `lib/` and `lib64/` are virtualenv artifacts; do not create top-level
+# source directories with these names.
+lib/
+lib64/
 
-# pytest / coverage
+# =============================================================================
+# Testing / linting / type-checking
+# =============================================================================
 .pytest_cache/
 .coverage
 .coverage.*
 htmlcov/
 coverage.xml
 *.cover
-
-# mypy
 .mypy_cache/
 .dmypy.json
 dmypy.json
-
-# ruff / linting
 .ruff_cache/
 
-# temp data
-temp/*
-
-# Output data — NEVER commit customer data
+# =============================================================================
+# Customer data — NEVER commit
+# =============================================================================
 output/
 output-*/
-*.json
+temp/
 *.xlsx
 *.csv
+*.json
 !scope.example.txt
-CLAUDE.md
-SPEC.md
 
-# IDE & AI assistant configuration (not part of the public tool)
+# =============================================================================
+# Secrets & credentials — NEVER commit
+# =============================================================================
+.env
+.env.*
+*.env
+secrets/
+credentials/
+.azure/
+*.pem
+*.key
+*.pfx
+*.p12
+*.crt
+id_rsa*
+*.ppk
+
+# =============================================================================
+# Internal-only docs (not part of the public tool)
+# Anchored to repo root so docs/SPEC.md (the public spec) stays tracked.
+# =============================================================================
+/CLAUDE.md
+/SPEC.md
+docs/SPEC.md
+/AGENTS.md
+/GEMINI.md
+/INTERNAL.md
+/DELIVERY.md
+/PLAYBOOK.md
+/NOTES.md
+/TODO.md
+/SCRATCH.md
+*.draft.md
+notes/
+scratch/
+wip/
+.scratch/
+
+# =============================================================================
+# IDE & AI assistant configuration
+# =============================================================================
 .vscode/
 .idea/
+.claude/
+.cursor/
+.cursorrules
+.cursorignore
+.windsurf/
+.windsurfrules
+.aider*
+.continue/
+.copilot/
+.github/copilot-instructions.md
 *.swp
 *.swo
-.claude/*
-.vscode/*
-.github/copilot-instructions.md
 
+# =============================================================================
+# Logs, backups, local databases
+# =============================================================================
+*.log
+logs/
+*.prof
+*.lprof
+*.pstats
+*.bak
+*~
+*.orig
+*.rej
+*.sqlite
+*.sqlite3
+*.db
+.cache/
 
+# =============================================================================
 # OS
+# =============================================================================
 .DS_Store
 Thumbs.db
-
-# Distribution / packaging
-dist/
-*.whl
