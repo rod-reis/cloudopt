@@ -229,7 +229,9 @@ def _row_to_vm(
             disk_count=disk_count,
             disk_sizes_gb=disk_sizes,
             vmss_name=_last_segment(vmss_raw) if vmss_raw else None,
+            vmss_id=vmss_raw if vmss_raw else None,
             availability_set_name=_last_segment(avset_raw) if avset_raw else None,
+            availability_set_id=avset_raw if avset_raw else None,
             raw_properties=cast(dict, row.get("properties")) if isinstance(row.get("properties"), dict) else {},
         )
     except Exception:

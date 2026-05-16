@@ -14,6 +14,7 @@ from typing import Optional
 
 from cloudopt.analyzer.detectors._shared import (
     _WorkloadGroup,
+    _best_enriched,
     _build_workload_groups,
     _get_mem_pct,
     _group_metrics,
@@ -24,6 +25,7 @@ from cloudopt.analyzer.detectors._shared import (
 )
 from cloudopt.analyzer.sku_catalog import SkuCatalog
 from cloudopt.analyzer.taxonomy import Category, SubCategory
+from cloudopt.enrichment.schema import EnrichedVmMetrics
 from cloudopt.models import (
     CollectionThresholds,
     Finding,
@@ -39,13 +41,15 @@ def detect(
     quota: list[QuotaItem],
     thresholds: CollectionThresholds,
     catalog: SkuCatalog,
+    *,
+    enriched_map: Optional[dict[str, EnrichedVmMetrics]] = None,
 ) -> list[Finding]:
     """Emit RSZ-DWN-001 Findings for underutilized and oversized workloads."""
     metrics_by_vm = _group_metrics(metrics)
     workloads = _build_workload_groups(vms)
     out: list[Finding] = []
     for group in workloads:
-        out.extend(_evaluate(group, metrics_by_vm, thresholds, catalog))
+        out.extend(_evaluate(group, metrics_by_vm, thresholds, catalog, enriched_map=enriched_map))
     return out
 
 
@@ -54,8 +58,11 @@ def _evaluate(
     metrics_by_vm: dict[str, dict[str, VmMetrics]],
     thresholds: CollectionThresholds,
     catalog: SkuCatalog,
+    *,
+    enriched_map: Optional[dict[str, EnrichedVmMetrics]] = None,
 ) -> list[Finding]:
     out: list[Finding] = []
+    group_enriched = _best_enriched(group.members, enriched_map)
 
     cpu_avgs: list[float] = []
     cpu_p95s: list[float] = []
@@ -65,7 +72,8 @@ def _evaluate(
         vm_met = metrics_by_vm.get(vm.resource_id, {})
         cpu_avg = _stat(vm_met, "Percentage CPU", "avg")
         cpu_p95 = _stat(vm_met, "Percentage CPU", "p95")
-        mem_pct, _ = _get_mem_pct(vm, vm_met, None)
+        vm_enriched = enriched_map.get(vm.resource_id) if enriched_map else None
+        mem_pct, _ = _get_mem_pct(vm, vm_met, vm_enriched)
 
         if cpu_avg is not None:
             cpu_avgs.append(cpu_avg)
@@ -108,7 +116,7 @@ def _evaluate(
                 f"{thresholds.underutilized_memory_avg}% threshold. "
                 "Consider a smaller SKU or decommissioning."
             )
-            out.append(_make_rsz_finding(group, sku, recommended, rationale, signal="underutilized"))
+            out.append(_make_rsz_finding(group, sku, recommended, rationale, signal="underutilized", enriched=group_enriched))
             size_rec_emitted = True
 
     # Rule B: oversized — P95 CPU below threshold (only if underutilized not emitted)
@@ -132,7 +140,7 @@ def _evaluate(
                 f"{max(0.5, memory_gb * ((mem_pct_avg or 50.0) / 100) * thresholds.headroom_multiplier):.1f}"
                 " GB memory."
             )
-            out.append(_make_rsz_finding(group, sku, recommended, rationale, signal="oversized"))
+            out.append(_make_rsz_finding(group, sku, recommended, rationale, signal="oversized", enriched=group_enriched))
 
     return out
 
@@ -168,13 +176,14 @@ def _make_rsz_finding(
     proposed_sku: Optional[str],
     rationale: str,
     signal: str = "",
+    enriched: Optional[EnrichedVmMetrics] = None,
 ) -> Finding:
     vm_id = (
         group.parent_id
         if group.is_aggregated
         else group.members[0].resource_id
     )
-    kwargs = _rec_kwargs()
+    kwargs = _rec_kwargs(enriched=enriched, category=Category.RIGHTSIZE)
     if signal:
         kwargs["deltas"] = {"signal": signal}
     return Finding(

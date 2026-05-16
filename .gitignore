@@ -103,6 +103,7 @@ notes/
 scratch/
 wip/
 .scratch/
+docs/prompts/*
 
 # =============================================================================
 # IDE & AI assistant configuration

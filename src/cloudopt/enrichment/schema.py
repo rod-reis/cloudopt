@@ -53,43 +53,149 @@ CANONICAL_CSV_COLUMNS: tuple[str, ...] = (
 
 CANONICAL_METRICS: dict[str, str] = {
     # ── OS — always available when a monitoring agent is installed ─────────
-    "os.cpu.percent":               "percent",         # total CPU utilisation
+    "os.cpu.percent":               "percent",         # legacy name (pre-SPEC §7.4)
+    "os.cpu.used_percent":          "percent",         # SPEC §7.4 canonical name
     "os.memory.used_percent":       "percent",         # used RAM % (excl. OS cache)
-    "os.memory.committed_bytes":    "bytes",           # virtual memory committed
+    "os.memory.committed_bytes":    "bytes",           # virtual memory committed (legacy)
+    "os.memory.available_mb":       "megabytes",       # SPEC §7.4: available RAM
     "os.memory.swap_used_percent":  "percent",         # swap / pagefile usage
-    "os.disk.used_percent":         "percent",         # disk space used %
-    "os.disk.iops_read":            "iops",
-    "os.disk.iops_write":           "iops",
-    "os.disk.queue_length":         "count",           # average disk queue depth
-    "os.network.bytes_in_per_sec":  "bytes_per_sec",
-    "os.network.bytes_out_per_sec": "bytes_per_sec",
+    "os.disk.used_percent":         "percent",         # disk space used % (legacy)
+    "os.disk.iops_read":            "iops",            # legacy name
+    "os.disk.read_iops":            "iops",            # SPEC §7.4 canonical name
+    "os.disk.iops_write":           "iops",            # legacy name
+    "os.disk.write_iops":           "iops",            # SPEC §7.4 canonical name
+    "os.disk.read_mbps":            "megabytes_per_sec",  # SPEC §7.4
+    "os.disk.write_mbps":           "megabytes_per_sec",  # SPEC §7.4
+    "os.disk.queue_length":         "count",           # average disk queue depth (legacy)
+    "os.network.bytes_in_per_sec":  "bytes_per_sec",   # legacy name
+    "os.network.receive_mbps":      "megabytes_per_sec",  # SPEC §7.4 canonical name
+    "os.network.bytes_out_per_sec": "bytes_per_sec",   # legacy name
+    "os.network.send_mbps":         "megabytes_per_sec",  # SPEC §7.4 canonical name
     # ── JVM ────────────────────────────────────────────────────────────────
     "jvm.heap.used_percent":        "percent",         # heap used / heap max
-    "jvm.heap.used_bytes":          "bytes",
-    "jvm.heap.max_bytes":           "bytes",
-    "jvm.gc.oldgen.time_ms":        "milliseconds",    # old-gen GC pause time
-    "jvm.gc.oldgen.count":          "count",           # old-gen GC collections
-    "jvm.threads.count":            "count",
-    "jvm.nonheap.used_bytes":       "bytes",           # metaspace
+    "jvm.heap.used_bytes":          "bytes",           # legacy name
+    "jvm.heap.used_mb":             "megabytes",       # SPEC §7.4 canonical name
+    "jvm.heap.max_bytes":           "bytes",           # legacy name
+    "jvm.heap.max_mb":              "megabytes",       # SPEC §7.4 canonical name
+    "jvm.gc.oldgen.time_ms":        "milliseconds",    # legacy: old-gen GC pause time
+    "jvm.gc.pause_ms_avg":          "milliseconds",    # SPEC §7.4 canonical name
+    "jvm.gc.pause_ms_p99":          "milliseconds",    # SPEC §7.4: p99 GC pause
+    "jvm.gc.oldgen.count":          "count",           # legacy: old-gen GC collections
+    "jvm.threads.count":            "count",           # legacy name
+    "jvm.threads.live_count":       "count",           # SPEC §7.4 canonical name
+    "jvm.nonheap.used_bytes":       "bytes",           # metaspace (legacy)
     # ── .NET CLR ───────────────────────────────────────────────────────────
-    "dotnet.gc.heap_bytes":         "bytes",
-    "dotnet.gc.gen2_collections":   "count_per_min",
-    "dotnet.threadpool.queue_length": "count",
-    "dotnet.exceptions.per_min":    "count_per_min",
+    "dotnet.gc.heap_bytes":         "bytes",           # legacy name
+    "dotnet.gc.heap_size_mb":       "megabytes",       # SPEC §7.4 canonical name
+    "dotnet.gc.gen2_collections":   "count_per_min",   # legacy name
+    "dotnet.gc.pause_ms_avg":       "milliseconds",    # SPEC §7.4 canonical name
+    "dotnet.threadpool.queue_length": "count",         # legacy name
+    "dotnet.threadpool.queue_depth_avg": "count",      # SPEC §7.4 canonical name
+    "dotnet.exceptions.per_min":    "count_per_min",   # legacy name
+    "dotnet.exceptions.rate":       "count_per_min",   # SPEC §7.4 canonical name
+    # ── IIS ────────────────────────────────────────────────────────────────
+    "iis.requests.per_sec":         "count_per_sec",
+    "iis.connections.current":      "count",
+    "iis.queue.length":             "count",
+    "iis.worker.restarts":          "count",
     # ── SQL Server ─────────────────────────────────────────────────────────
-    "sql.buffer.page_life_expectancy": "seconds",      # target > 300 s
-    "sql.buffer.cache_hit_ratio":   "percent",
-    "sql.memory.target_mb":         "megabytes",       # target server memory
-    "sql.memory.used_mb":           "megabytes",       # total server memory used
-    "sql.waits.top_wait_type":      "text",            # most common wait type
+    "sql.buffer.page_life_expectancy": "seconds",      # target > 300 s (legacy)
+    "sql.buffer.cache_hit_ratio":   "percent",         # legacy name
+    "sql.cpu.used_percent":         "percent",         # SPEC §7.4
+    "sql.memory.buffer_pool_hit_percent": "percent",   # SPEC §7.4
+    "sql.memory.target_mb":         "megabytes",       # target server memory (legacy)
+    "sql.memory.used_mb":           "megabytes",       # total server memory used (legacy)
+    "sql.disk.read_iops":           "iops",            # SPEC §7.4
+    "sql.disk.write_iops":          "iops",            # SPEC §7.4
+    "sql.connections.active_count": "count",           # SPEC §7.4
+    "sql.waits.top_wait_type":      "text",            # most common wait type (legacy)
+    "sql.waits.total_wait_ms_avg":  "milliseconds",    # SPEC §7.4
+    "sql.batch_requests.per_sec":   "count_per_sec",   # SPEC §7.4
+    # ── PostgreSQL ─────────────────────────────────────────────────────────
+    "postgres.cpu.used_percent":            "percent",
+    "postgres.connections.active_count":    "count",
+    "postgres.cache.hit_ratio_percent":     "percent",
+    "postgres.transactions.per_sec":        "count_per_sec",
+    # ── MySQL ──────────────────────────────────────────────────────────────
+    "mysql.cpu.used_percent":                       "percent",
+    "mysql.connections.active_count":               "count",
+    "mysql.innodb.buffer_pool_hit_ratio_percent":   "percent",
+    "mysql.queries.per_sec":                        "count_per_sec",
 }
 
 #: Logical groups for display / filtering.
 METRIC_GROUPS: dict[str, list[str]] = {
-    "os":     [m for m in CANONICAL_METRICS if m.startswith("os.")],
-    "jvm":    [m for m in CANONICAL_METRICS if m.startswith("jvm.")],
-    "dotnet": [m for m in CANONICAL_METRICS if m.startswith("dotnet.")],
-    "sql":    [m for m in CANONICAL_METRICS if m.startswith("sql.")],
+    "os":       [m for m in CANONICAL_METRICS if m.startswith("os.")],
+    "jvm":      [m for m in CANONICAL_METRICS if m.startswith("jvm.")],
+    "dotnet":   [m for m in CANONICAL_METRICS if m.startswith("dotnet.")],
+    "iis":      [m for m in CANONICAL_METRICS if m.startswith("iis.")],
+    "sql":      [m for m in CANONICAL_METRICS if m.startswith("sql.")],
+    "postgres": [m for m in CANONICAL_METRICS if m.startswith("postgres.")],
+    "mysql":    [m for m in CANONICAL_METRICS if m.startswith("mysql.")],
+}
+
+#: Maps canonical metric names (both legacy and SPEC §7.4) to GuestMetricRow field names.
+#: Used by the enrichment joiner to populate GuestMetricRow from MonitoringDataPoints.
+CANONICAL_TO_GUEST_FIELD: dict[str, str] = {
+    # OS group
+    "os.cpu.percent":               "os_cpu_used_percent",   # legacy
+    "os.cpu.used_percent":          "os_cpu_used_percent",
+    "os.memory.used_percent":       "os_memory_used_percent",
+    "os.memory.available_mb":       "os_memory_available_mb",
+    "os.memory.swap_used_percent":  "os_memory_swap_used_percent",
+    "os.disk.iops_read":            "os_disk_read_iops",     # legacy
+    "os.disk.read_iops":            "os_disk_read_iops",
+    "os.disk.iops_write":           "os_disk_write_iops",    # legacy
+    "os.disk.write_iops":           "os_disk_write_iops",
+    "os.disk.read_mbps":            "os_disk_read_mbps",
+    "os.disk.write_mbps":           "os_disk_write_mbps",
+    "os.network.bytes_in_per_sec":  "os_network_receive_mbps",  # legacy (approx)
+    "os.network.receive_mbps":      "os_network_receive_mbps",
+    "os.network.bytes_out_per_sec": "os_network_send_mbps",     # legacy (approx)
+    "os.network.send_mbps":         "os_network_send_mbps",
+    # JVM group
+    "jvm.heap.used_percent":        "jvm_heap_used_percent",
+    "jvm.heap.used_bytes":          "jvm_heap_used_mb",      # legacy (convert bytes→MB at join time)
+    "jvm.heap.used_mb":             "jvm_heap_used_mb",
+    "jvm.heap.max_bytes":           "jvm_heap_max_mb",       # legacy (convert bytes→MB at join time)
+    "jvm.heap.max_mb":              "jvm_heap_max_mb",
+    "jvm.gc.oldgen.time_ms":        "jvm_gc_pause_ms_avg",   # legacy (closest equivalent)
+    "jvm.gc.pause_ms_avg":          "jvm_gc_pause_ms_avg",
+    "jvm.gc.pause_ms_p99":          "jvm_gc_pause_ms_p99",
+    "jvm.threads.count":            "jvm_threads_live_count", # legacy
+    "jvm.threads.live_count":       "jvm_threads_live_count",
+    # .NET group
+    "dotnet.gc.heap_bytes":         "dotnet_gc_heap_size_mb",  # legacy (convert bytes→MB)
+    "dotnet.gc.heap_size_mb":       "dotnet_gc_heap_size_mb",
+    "dotnet.gc.pause_ms_avg":       "dotnet_gc_pause_ms_avg",
+    "dotnet.threadpool.queue_length":    "dotnet_threadpool_queue_depth_avg",  # legacy
+    "dotnet.threadpool.queue_depth_avg": "dotnet_threadpool_queue_depth_avg",
+    "dotnet.exceptions.per_min":    "dotnet_exceptions_rate",  # legacy
+    "dotnet.exceptions.rate":       "dotnet_exceptions_rate",
+    # IIS group
+    "iis.requests.per_sec":         "iis_requests_per_sec",
+    "iis.connections.current":      "iis_connections_current",
+    "iis.queue.length":             "iis_queue_length",
+    "iis.worker.restarts":          "iis_worker_restarts",
+    # SQL Server group
+    "sql.cpu.used_percent":                 "sql_cpu_used_percent",
+    "sql.memory.buffer_pool_hit_percent":   "sql_memory_buffer_pool_hit_percent",
+    "sql.buffer.cache_hit_ratio":           "sql_memory_buffer_pool_hit_percent",  # legacy
+    "sql.disk.read_iops":                   "sql_disk_read_iops",
+    "sql.disk.write_iops":                  "sql_disk_write_iops",
+    "sql.connections.active_count":         "sql_connections_active_count",
+    "sql.waits.total_wait_ms_avg":          "sql_waits_total_wait_ms_avg",
+    "sql.batch_requests.per_sec":           "sql_batch_requests_per_sec",
+    # PostgreSQL group
+    "postgres.cpu.used_percent":            "postgres_cpu_used_percent",
+    "postgres.connections.active_count":    "postgres_connections_active_count",
+    "postgres.cache.hit_ratio_percent":     "postgres_cache_hit_ratio_percent",
+    "postgres.transactions.per_sec":        "postgres_transactions_per_sec",
+    # MySQL group
+    "mysql.cpu.used_percent":                       "mysql_cpu_used_percent",
+    "mysql.connections.active_count":               "mysql_connections_active_count",
+    "mysql.innodb.buffer_pool_hit_ratio_percent":   "mysql_innodb_buffer_pool_hit_ratio_percent",
+    "mysql.queries.per_sec":                        "mysql_queries_per_sec",
 }
 
 KNOWN_SOURCE_TOOLS: frozenset[str] = frozenset({
@@ -185,3 +291,91 @@ class MonitoringConfidence:
     PLATFORM_ONLY  = "platform-only"    # Azure Monitor host-level metrics only
     OS_AWARE       = "os-aware"         # OS-level agent data (memory, swap, etc.)
     WORKLOAD_AWARE = "workload-aware"   # JVM / .NET / SQL runtime metrics present
+
+
+# ---------------------------------------------------------------------------
+# Guest-OS metric snapshot (SPEC §7.4 — locked 39-column set)
+# ---------------------------------------------------------------------------
+
+class GuestMetricRow(BaseModel):
+    """One row of guest-OS metrics for a VM or managed-compute group.
+
+    Fields match exactly the columns defined in SPEC §7.4, in the same order.
+    A None value means the metric was not available; ``has_any_data`` is True
+    when at least one field is populated.
+    """
+    # ── OS group (10) ───────────────────────────────────────────────────────
+    os_cpu_used_percent: Optional[float] = None
+    os_memory_used_percent: Optional[float] = None
+    os_memory_available_mb: Optional[float] = None
+    os_memory_swap_used_percent: Optional[float] = None
+    os_disk_read_iops: Optional[float] = None
+    os_disk_write_iops: Optional[float] = None
+    os_disk_read_mbps: Optional[float] = None
+    os_disk_write_mbps: Optional[float] = None
+    os_network_receive_mbps: Optional[float] = None
+    os_network_send_mbps: Optional[float] = None
+
+    # ── JVM group (6) ──────────────────────────────────────────────────────
+    jvm_heap_used_percent: Optional[float] = None
+    jvm_heap_used_mb: Optional[float] = None
+    jvm_heap_max_mb: Optional[float] = None
+    jvm_gc_pause_ms_avg: Optional[float] = None
+    jvm_gc_pause_ms_p99: Optional[float] = None
+    jvm_threads_live_count: Optional[float] = None
+
+    # ── .NET group (4) ─────────────────────────────────────────────────────
+    dotnet_gc_heap_size_mb: Optional[float] = None
+    dotnet_gc_pause_ms_avg: Optional[float] = None
+    dotnet_threadpool_queue_depth_avg: Optional[float] = None
+    dotnet_exceptions_rate: Optional[float] = None
+
+    # ── IIS group (4) ──────────────────────────────────────────────────────
+    iis_requests_per_sec: Optional[float] = None
+    iis_connections_current: Optional[float] = None
+    iis_queue_length: Optional[float] = None
+    iis_worker_restarts: Optional[float] = None
+
+    # ── SQL Server group (7) ───────────────────────────────────────────────
+    sql_cpu_used_percent: Optional[float] = None
+    sql_memory_buffer_pool_hit_percent: Optional[float] = None
+    sql_disk_read_iops: Optional[float] = None
+    sql_disk_write_iops: Optional[float] = None
+    sql_connections_active_count: Optional[float] = None
+    sql_waits_total_wait_ms_avg: Optional[float] = None
+    sql_batch_requests_per_sec: Optional[float] = None
+
+    # ── PostgreSQL group (4) ───────────────────────────────────────────────
+    postgres_cpu_used_percent: Optional[float] = None
+    postgres_connections_active_count: Optional[float] = None
+    postgres_cache_hit_ratio_percent: Optional[float] = None
+    postgres_transactions_per_sec: Optional[float] = None
+
+    # ── MySQL group (4) ────────────────────────────────────────────────────
+    mysql_cpu_used_percent: Optional[float] = None
+    mysql_connections_active_count: Optional[float] = None
+    mysql_innodb_buffer_pool_hit_ratio_percent: Optional[float] = None
+    mysql_queries_per_sec: Optional[float] = None
+
+    @property
+    def has_any_data(self) -> bool:
+        """True when at least one guest metric field is populated."""
+        return any(
+            getattr(self, f) is not None
+            for f in self.model_fields
+        )
+
+    @classmethod
+    def from_enriched(cls, enriched: "EnrichedVmMetrics") -> "GuestMetricRow":
+        """Build a GuestMetricRow from an EnrichedVmMetrics object."""
+        kwargs: dict[str, Optional[float]] = {}
+        for dp in enriched.data_points:
+            field_name = CANONICAL_TO_GUEST_FIELD.get(dp.metric_name)
+            if field_name is None:
+                continue
+            # Bytes-to-megabytes conversion for legacy byte-unit fields
+            value = dp.avg_value
+            if value is not None and dp.unit == "bytes" and field_name.endswith("_mb"):
+                value = value / (1024 * 1024)
+            kwargs[field_name] = value
+        return cls(**kwargs)

@@ -5,10 +5,14 @@ group, region, tag filters) from the ARG ``resources`` table, excluding the
 ``tags`` and ``properties`` blobs.  Used to populate the **Inventory** sheet
 in the Excel workbook so analysts have a full picture of what exists in the
 estate alongside the VM-level analysis.
+
+Only resource types listed in ``data/inscoperesourcetypes.csv`` are collected;
+types absent from the file are excluded so the inventory stays focused.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from azure.identity import DefaultAzureCredential
@@ -24,6 +28,34 @@ from cloudopt.scope import ScopeFilter, kql_location_clause, kql_resource_group_
 console = Console()
 
 _MAX_SUBS_PER_QUERY = 200
+
+# ---------------------------------------------------------------------------
+# In-scope resource type allowlist
+# ---------------------------------------------------------------------------
+
+def _load_inscope_types() -> frozenset[str]:
+    """Load in-scope resource types from the CSV file (case-insensitive)."""
+    data_file = Path(__file__).parent.parent / "data" / "inscoperesourcetypes.csv"
+    if not data_file.exists():
+        return frozenset()
+    types: set[str] = set()
+    for line in data_file.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            types.add(line.lower())
+    return frozenset(types)
+
+
+_IN_SCOPE_RESOURCE_TYPES: frozenset[str] = _load_inscope_types()
+
+
+def _type_filter_clause() -> str:
+    """Return a KQL ``| where type in~(...)`` clause for in-scope types."""
+    if not _IN_SCOPE_RESOURCE_TYPES:
+        return ""
+    quoted = ", ".join(f"'{t}'" for t in sorted(_IN_SCOPE_RESOURCE_TYPES))
+    return f"\n| where type in~ ({quoted})"
+
 
 # KQL query: projects the standard ARG columns every analyst expects to see.
 # Tags and the large ``properties`` blob are intentionally omitted.
@@ -56,7 +88,12 @@ def _scope_clauses(scope: ScopeFilter | None) -> str:
 
 
 def _build_query(scope: ScopeFilter | None) -> str:
-    return _RESOURCES_QUERY_BASE + _scope_clauses(scope) + _RESOURCES_QUERY_TAIL
+    return (
+        _RESOURCES_QUERY_BASE
+        + _type_filter_clause()
+        + _scope_clauses(scope)
+        + _RESOURCES_QUERY_TAIL
+    )
 
 
 def collect_resources(

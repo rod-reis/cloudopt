@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import re
-from typing import Optional
+from enum import Enum
+from typing import Any, Optional
 from pydantic import BaseModel, Field, model_validator
 
 from cloudopt.analyzer.taxonomy import (
@@ -88,22 +89,24 @@ class CollectionThresholds(BaseModel):
         default=30,
         description="Measurement window in days for quota utilization.",
     )
-    # --- §2.6 reservation / capacity-reservation thresholds ---
-    rsvp_underutilized_pct: float = Field(
-        default=80.0,
-        description="RI/SP utilization % below which RSV-UND-001 fires.",
-    )
-    rsvp_expiring_days: int = Field(
-        default=60,
-        description="Days to expiry at or below which RSV-EXP-001 fires.",
-    )
-    rsvp_uncovered_cpu_p95_pct: float = Field(
-        default=20.0,
-        description=(
-            "P95 CPU % above which a VM is considered steady-state"
-            " for RSV-UNC-001 (uncovered VM check)."
-        ),
-    )
+
+
+# ---------------------------------------------------------------------------
+# Managed-compute parentage
+# ---------------------------------------------------------------------------
+
+class ParentServiceType(str, Enum):
+    """Managed Azure service that owns a VMSS (and its member VMs)."""
+    STANDALONE = "Standalone"
+    STANDALONE_VMSS = "Standalone VMSS"
+    AKS = "AKS"
+    AVD = "AVD"
+    DATABRICKS = "Databricks"
+    AZURE_BATCH = "Azure Batch"
+    AML = "AML"
+    ARO = "ARO"
+    HDINSIGHT = "HDInsight"
+    OTHER = "Other"
 
 
 # ---------------------------------------------------------------------------
@@ -127,6 +130,7 @@ class VmInventory(BaseModel):
     os_version: Optional[str] = None       # from imageReference.exactVersion
     availability_zone: Optional[str] = None
     power_state: Optional[str] = None      # e.g. PowerState/running, PowerState/deallocated
+    days_stopped: Optional[int] = None     # calendar days since last successful deallocate/stop event (Activity Log lookback 90 d)
 
     # Image reference (from storageProfile.imageReference)
     image_publisher: Optional[str] = None  # e.g. "MicrosoftWindowsServer"
@@ -141,7 +145,15 @@ class VmInventory(BaseModel):
 
     # Grouping
     vmss_name: Optional[str] = None
+    vmss_id: Optional[str] = None                          # full resource ID of parent VMSS
     availability_set_name: Optional[str] = None
+    availability_set_id: Optional[str] = None              # full resource ID of AvSet
+
+    # Managed-compute parentage (populated by collector/parentage.py)
+    parent_service_type: ParentServiceType = ParentServiceType.STANDALONE
+    parent_service_id: Optional[str] = None                # resource ID of the owning service
+    parent_service_name: Optional[str] = None              # human-readable cluster/workspace name
+    parent_pool_name: Optional[str] = None                 # node pool / machine set / pool
 
     # Analyst-editable annotation fields (blank by default, filled manually in Excel)
     workload: Optional[str] = None
@@ -183,6 +195,57 @@ class VmMetrics(BaseModel):
     max: Optional[float] = None
     min: Optional[float] = None
     time_series: list[DailyDataPoint] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Managed-compute group (one row per VMSS × SKU pair in Excel)
+# ---------------------------------------------------------------------------
+
+class ManagedComputeGroupRow(BaseModel):
+    """Aggregated performance row for one (VM group, SKU) pair.
+
+    Used for the *Perf by VM Group per SKU* sheet (SPEC §7.2.2).
+    """
+    # Identity
+    parent_service_type: ParentServiceType
+    parent_service_name: Optional[str] = None
+    parent_service_id: Optional[str] = None
+    parent_pool_name: Optional[str] = None       # node pool / machine set / pool name
+    parent_resource_type: Optional[str] = None   # ARM resource type string (e.g. "microsoft.containerservice/managedclusters")
+    vmss_name: Optional[str] = None
+    vmss_id: Optional[str] = None
+    vm_sku: str
+    instance_count: int                           # VMs in this SKU slice of the group
+    total_instance_count: int = 0                 # total VMs in the whole VMSS
+    subscription_name: str
+    subscription_id: str
+    resource_group: str
+    region: str
+    os_type: Optional[str] = None
+    os_image: Optional[str] = None
+    zones: Optional[str] = None
+    vcpus: int = 0
+    memory_gb: float = 0.0
+    tags: Optional[str] = None
+
+    # Platform metric aggregates (across all instances of this SKU in the group)
+    avg_cpu_pct: Optional[float] = None
+    p95_cpu_pct: Optional[float] = None
+    p99_cpu_pct: Optional[float] = None
+    max_cpu_pct: Optional[float] = None
+    min_cpu_pct: Optional[float] = None
+    avg_mem_pct: Optional[float] = None
+
+    # Guest metrics — populated when enrichment data is available
+    # Fields match GuestMetricRow (imported lazily to avoid circular import);
+    # stored as a flat dict here for serialisation simplicity.
+    guest_metrics: dict[str, Any] = Field(default_factory=dict)
+    has_os_data: bool = False
+
+    # Coverage
+    sources_used: Optional[str] = None
+    days_observed: Optional[int] = None
+    coverage_pct: Optional[float] = None
 
 
 # ---------------------------------------------------------------------------
@@ -336,6 +399,7 @@ class QuotaItem(BaseModel):
     # Enriched quota-risk fields (populated by Activity Log query; None when unavailable)
     peak_usage_pct_30d: Optional[float] = None   # highest observed utilisation % in last 30 d
     allocation_failures_30d: int = 0              # count of AllocationFailed events in last 30 d
+    subscription_default: Optional[int] = None    # PAYG baseline vCPU limit for this quota type (10 for most families)
 
     def masked_subscription_id(self) -> str:
         return mask_subscription_id(self.subscription_id)
@@ -602,34 +666,6 @@ class Finding(BaseModel):
                     " not HIGH (SPEC §6.3)"
                 )
         return self
-
-
-# ---------------------------------------------------------------------------
-# Reservations & Savings Plans (SPEC §2.6, §3.4)
-# ---------------------------------------------------------------------------
-
-class ReservationOrder(BaseModel):
-    """A single RI / Savings Plan reservation order (SPEC §3.4).
-
-    Counts, percentages, and dates only — no $ / cost fields (SPEC §1.2).
-    """
-
-    order_id: str                          # ARM resource ID (may span subscriptions)
-    display_name: str
-    term: str                              # e.g. P1Y | P3Y | P5Y
-    expiry_date: str                       # ISO 8601 date YYYY-MM-DD
-    sku_name: str                          # VM SKU covered by this order
-    region: str
-    reserved_count: int
-    applied_scope_type: str               # Shared | Single
-    applied_scope_ids: list[str] = Field(default_factory=list)  # subscription IDs
-    # Utilization from Microsoft.Consumption/reservationDetails (last 30 days).
-    # None when the Consumption API is unavailable or permissions are absent.
-    utilization_pct: Optional[float] = None  # 0–100
-
-    def masked_applied_scope_ids(self) -> list[str]:
-        """Return subscription IDs with internal UUIDs partially masked."""
-        return [mask_subscription_id(s) for s in self.applied_scope_ids]
 
 
 class CapacityReservationItem(BaseModel):

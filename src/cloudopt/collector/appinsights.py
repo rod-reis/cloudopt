@@ -598,7 +598,14 @@ async def _collect_jvm_metrics(
                 return ws_results
             except Exception as exc:
                 console.print(
-                    f"[dim]  JVM metrics query failed for workspace {customer_id[:8]}…: {exc}[/dim]"
+                    f"[yellow]  ⚠ JVM metrics skipped[/yellow] for workspace "
+                    f"{customer_id[:8]}… "
+                    f"The Log Analytics API uses audience "
+                    f"'https://api.loganalytics.io' (distinct from ARM), so "
+                    f"DefaultAzureCredential must hold a token for that audience. "
+                    f"Assign the 'Log Analytics Reader' role on the workspace to "
+                    f"the identity running this tool, then re-run. "
+                    f"({type(exc).__name__}: {exc})"
                 )
                 return []
 

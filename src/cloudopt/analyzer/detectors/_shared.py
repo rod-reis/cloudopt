@@ -10,48 +10,56 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
+from cloudopt.analyzer.confidence import score as _confidence_score
 from cloudopt.analyzer.taxonomy import (
+    Category,
     Confidence,
     FindingType,
     Readiness,
 )
-from cloudopt.enrichment.schema import EnrichedVmMetrics
+from cloudopt.enrichment.schema import EnrichedVmMetrics, MonitoringConfidence
 from cloudopt.models import (
     VmInventory,
     VmMetrics,
 )
 
-# ---------------------------------------------------------------------------
-# Transitional confidence defaults (SPEC §11.2.3)
-# ---------------------------------------------------------------------------
 
-#: All Step-2 RECOMMENDATIONs ship with MEDIUM/LIKELY until Step 3 adds
-#: source-aware scoring.
-_STEP2_BLOCKERS: list[str] = ["source-aware confidence scoring lands in Step 3"]
+def _rec_kwargs(
+    enriched: Optional[EnrichedVmMetrics] = None,
+    category: Optional[Category] = None,
+) -> dict:
+    """Return confidence-scored keyword defaults for a RECOMMENDATION Finding.
 
-_STEP2_EVIDENCE: list[str] = ["platform"]
-
-
-def _rec_kwargs() -> dict:
-    """Return the transitional keyword defaults for a RECOMMENDATION Finding."""
+    Args:
+        enriched:  Best ``EnrichedVmMetrics`` for the VM / workload group, or
+                   ``None`` when no monitoring export matched this VM.
+        category:  Finding category used to determine whether the signal is
+                   authoritative (CLEANUP / QUOTA / RSVP / CRR / DECOM) or
+                   metric-dependent (RIGHTSIZE / SWAP).
+    """
+    scored = _confidence_score(enriched, category or Category.RIGHTSIZE)
     return {
         "finding_type": FindingType.RECOMMENDATION,
-        "confidence": Confidence.MEDIUM,
+        "confidence": scored.confidence,
         "readiness": Readiness.LIKELY,
-        "evidence_sources": list(_STEP2_EVIDENCE),
-        "blockers_to_high": list(_STEP2_BLOCKERS),
+        "evidence_sources": scored.evidence_sources,
+        "blockers_to_high": scored.blockers_to_high,
         "customer_inputs_needed": [],
         "deltas": {},
     }
 
 
-def _candidate_kwargs() -> dict:
-    """Return the transitional keyword defaults for a CANDIDATE Finding."""
+def _candidate_kwargs(
+    enriched: Optional[EnrichedVmMetrics] = None,
+    category: Optional[Category] = None,
+) -> dict:
+    """Return confidence-scored keyword defaults for a CANDIDATE Finding."""
+    scored = _confidence_score(enriched, category or Category.RIGHTSIZE)
     return {
         "finding_type": FindingType.CANDIDATE,
         "confidence": None,
         "readiness": Readiness.DISCOVERY,
-        "evidence_sources": list(_STEP2_EVIDENCE),
+        "evidence_sources": scored.evidence_sources,
         "blockers_to_high": [],
         "customer_inputs_needed": [],
         "deltas": {},
@@ -154,6 +162,44 @@ def _build_workload_groups(vms: list[VmInventory]) -> list[_WorkloadGroup]:
             groups[pid] = g
         g.members.append(vm)
     return list(groups.values())
+
+
+# ---------------------------------------------------------------------------
+# Enrichment helpers
+# ---------------------------------------------------------------------------
+
+_TIER_ORDER = {
+    MonitoringConfidence.WORKLOAD_AWARE: 2,
+    MonitoringConfidence.OS_AWARE: 1,
+    MonitoringConfidence.PLATFORM_ONLY: 0,
+}
+
+
+def _best_enriched(
+    members: list[VmInventory],
+    enriched_map: Optional[dict[str, EnrichedVmMetrics]],
+) -> Optional[EnrichedVmMetrics]:
+    """Return the highest-confidence ``EnrichedVmMetrics`` for a workload group.
+
+    For workload groups with multiple members (VMSS, AvailabilitySet, etc.) we
+    pick the VM whose enrichment data has the highest confidence tier.  This is
+    conservative — a single OS-aware VM in a group upgrades the whole group to
+    os-aware, which is the right call because the missing VMs are likely
+    identical instances.
+    """
+    if not enriched_map:
+        return None
+    best: Optional[EnrichedVmMetrics] = None
+    best_rank = -1
+    for vm in members:
+        candidate = enriched_map.get(vm.resource_id)
+        if candidate is None:
+            continue
+        rank = _TIER_ORDER.get(candidate.confidence_tier, 0)
+        if rank > best_rank:
+            best = candidate
+            best_rank = rank
+    return best
 
 
 # ---------------------------------------------------------------------------

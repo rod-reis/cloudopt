@@ -52,10 +52,6 @@ _EXPECTED_CODES: set[str] = {
     "QTA-WRN-001",
     "QTA-CRI-001",
     "QTA-CRG-001",
-    # rsvp (3)
-    "RSV-UND-001",
-    "RSV-EXP-001",
-    "RSV-UNC-001",
     # crr (2)
     "CRR-UNU-001",
     "CRR-UNF-001",
@@ -78,7 +74,7 @@ _EXPECTED_SUBCODES_BY_CATEGORY: dict[str, set[str]] = {
 
 class TestRegistryCompleteness:
     def test_registry_has_23_entries(self) -> None:
-        assert len(REGISTRY) == 28
+        assert len(REGISTRY) == 25
 
     def test_all_spec_codes_present(self) -> None:
         actual_codes = {e.code for e in REGISTRY}
@@ -105,11 +101,10 @@ class TestRegistryCandidates:
         candidates = [e for e in REGISTRY if e.finding_type is FindingType.CANDIDATE]
         candidate_codes = {c.code for c in candidates}
         assert "SWP-ARC-001" in candidate_codes
-        assert "RSV-UNC-001" in candidate_codes
 
     def test_22_recommendations(self) -> None:
         recs = [e for e in REGISTRY if e.finding_type is FindingType.RECOMMENDATION]
-        assert len(recs) == 26
+        assert len(recs) == 24
 
     def test_candidate_is_in_swap_category(self) -> None:
         candidate = REGISTRY_BY_CODE["SWP-ARC-001"]

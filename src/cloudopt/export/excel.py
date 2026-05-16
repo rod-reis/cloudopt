@@ -1,19 +1,28 @@
 """Multi-sheet Excel workbook generation using openpyxl.
 
-Sheet layout (13 sheets):
-  1. Workload Information
-  2. Quota Utilization
-  3. VM Inventory
-  4. Performance Summary
-  5. SKU Perf by Subscription
-  6. SKU Perf by Resource Group
-  7. SKU Perf by VMSS
-  8. SKU Perf by Availability Set
-  9. Optimizations
-  10. Raw Metrics
-  11. Collection Metadata
-  12. SubscriptionsZoneMapping
-  13. Inventory              ← full ARG resource inventory (new)
+22-sheet model (Phase C — SPEC §7):
+  1.  Optimizations            ← RECOMMENDATION findings + Advisor SKU changes
+  2.  Optimization Candidates  ← CANDIDATE findings requiring customer input
+  3.  Summary                  ← KPI block, charts, top-10 READY decisions
+  4.  Anomalies                ← platform vs external metric disagreements
+  5.  Quota Posture            ← per-subscription quota utilization
+  6.  Perf by VM - Standalone  ← per-VM platform + guest metrics (standalone only)
+  7.  Perf by VM Group per SKU ← aggregated managed-service group rows
+  8.  Perf by VM SKU per Subscription
+  9.  Perf by VM SKU per Resource Group
+  10. AKS
+  11. AVD
+  12. Databricks
+  13. Azure Batch
+  14. AML
+  15. ARO
+  16. HDInsight
+  17. Resource Inventory        ← ARG resource list
+  18. Workload Information
+  19. Capacity Reservations
+  20. Deployment Failures
+  21. Run Metadata
+  22. App Insights
 """
 
 from __future__ import annotations
@@ -35,6 +44,9 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.table import Table, TableStyleInfo
 from openpyxl.worksheet.worksheet import Worksheet
 
+from openpyxl.chart import BarChart, PieChart, Reference
+
+from cloudopt.analyzer.taxonomy import Category, Confidence, FindingType, Readiness
 from cloudopt.enrichment.schema import EnrichedVmMetrics
 from cloudopt.models import (
     AdvisorRecommendation,
@@ -43,15 +55,19 @@ from cloudopt.models import (
     AzureResource,
     CapacityReservationGroup,
     CollectionMetadata,
+    CollectionThresholds,
     DeploymentFailureEntry,
+    Finding,
+    ManagedComputeGroupRow,
+    ParentServiceType,
     QuotaItem,
-    ReservationOrder,
     SubscriptionZoneMapping,
     VmInventory,
     VmMetrics,
     VmRecommendation,
     WorkloadInfo,
     mask_subscription_id,
+    mask_subscription_ids_in_string,
 )
 
 # ---------------------------------------------------------------------------
@@ -64,6 +80,22 @@ _CSA_FILL = PatternFill("solid", fgColor="BDD7EE")      # Analyst-editable colum
 _GREEN_FILL = PatternFill("solid", fgColor="C6EFCE")
 _YELLOW_FILL = PatternFill("solid", fgColor="FFEB9C")
 _RED_FILL = PatternFill("solid", fgColor="FFC7CE")
+
+# Readiness tier fills
+_READY_FILL = PatternFill("solid", fgColor="C6EFCE")    # green — READY
+_LIKELY_FILL = PatternFill("solid", fgColor="FFEB9C")   # yellow — LIKELY
+_DISCOVERY_FILL = PatternFill("solid", fgColor="D9D9D9") # grey — DISCOVERY
+_INSUFF_FILL = PatternFill("solid", fgColor="FFC7CE")   # red — INSUFFICIENT
+
+# Confidence tier fills
+_HIGH_FILL = PatternFill("solid", fgColor="C6EFCE")     # green
+_MED_FILL = PatternFill("solid", fgColor="FFEB9C")      # yellow
+_LOW_FILL = PatternFill("solid", fgColor="FFC7CE")      # red
+
+# Technical Summary beautification fills
+_SECTION_FILL  = PatternFill("solid", fgColor="2E75B6")  # azure blue — section sub-headers
+_BAND_FILL     = PatternFill("solid", fgColor="F2F7FC")  # very light blue — KPI row bands
+_COL_HDR_FILL  = PatternFill("solid", fgColor="4472C4")  # periwinkle — column sub-headers
 
 _THIN_BORDER = Border(
     left=Side(style="thin", color="B8CCE4"),
@@ -79,65 +111,115 @@ _THIN_BORDER = Border(
 def write_workbook(
     vms: list[VmInventory],
     metrics: list[VmMetrics],
-    recommendations: list[VmRecommendation],
-    metadata: CollectionMetadata,
-    path: Path,
+    findings: list[Finding] | None = None,
+    metadata: CollectionMetadata | None = None,
+    path: Path | None = None,
     *,
-    quota: list[QuotaItem] | None = None,
-    appinsights: list[AppInsightsInventory] | None = None,
-    appinsights_metrics: list[AppInsightsMetrics] | None = None,
     advisor: list[AdvisorRecommendation] | None = None,
-    workload_info: WorkloadInfo | None = None,
-    zone_mappings: list[SubscriptionZoneMapping] | None = None,
     enriched_metrics: list[EnrichedVmMetrics] | None = None,
-    resources: list[AzureResource] | None = None,
-    reservations: list[ReservationOrder] | None = None,
+    quota_items: list[QuotaItem] | None = None,
     capacity_reservations: list[CapacityReservationGroup] | None = None,
     deployment_failures: list[DeploymentFailureEntry] | None = None,
+    resources: list[AzureResource] | None = None,
+    workload_info: WorkloadInfo | None = None,
+    managed_groups: list[ManagedComputeGroupRow] | None = None,
+    app_insights: list[Any] | None = None,
+    # Legacy compat params kept as kwargs to avoid breaking callers
+    recommendations: list[Any] | None = None,
+    quota: list[QuotaItem] | None = None,
+    appinsights: list[Any] | None = None,
+    appinsights_metrics: list[Any] | None = None,
+    zone_mappings: list[Any] | None = None,
 ) -> None:
-    """Write the full Excel workbook to *path*."""
+    """Write the full Excel workbook to *path* (22-sheet Phase C model)."""
+    if path is None:
+        raise TypeError("write_workbook() requires a 'path' argument")
+    if metadata is None:
+        metadata = CollectionMetadata(
+            run_date="",
+            tool_version="",
+            subscriptions_scanned=[],
+            metrics_period_days=0,
+            total_vm_count=len(vms),
+            thresholds=CollectionThresholds(),
+        )
+    from cloudopt.export.excel_perf import (
+        sheet_perf_standalone,
+        sheet_perf_group_by_sku,
+        sheet_sku_by_subscription,
+        sheet_sku_by_resource_group,
+    )
+    from cloudopt.export.excel_managed import sheet_managed_service
+
     wb = Workbook()
     wb.remove(wb.active)  # remove default blank sheet
 
     metrics_by_vm = _group_metrics(metrics)
+    findings_list: list[Finding] = findings or []
+    enriched_list: list[EnrichedVmMetrics] = enriched_metrics or []
 
-    _sheet_workload_info(wb, workload_info or WorkloadInfo())
-    _sheet_quota(wb, quota or [])
-    _sheet_inventory(wb, vms)
-    _sheet_perf_summary(wb, vms, metrics_by_vm)
-    _sheet_sku_flat(
-        wb, vms, metrics_by_vm, "SKU Perf by Subscription",
-        ["subscription_name"], ["Subscription"], [30], "TblSkuBySub",
-    )
-    _sheet_sku_flat(
-        wb, vms, metrics_by_vm, "SKU Perf by Resource Group",
-        ["subscription_name", "resource_group"], ["Subscription", "Resource Group"],
-        [30, 28], "TblSkuByRG",
-    )
-    vmss_vms = [v for v in vms if v.vmss_name]
-    _sheet_sku_flat(
-        wb, vmss_vms, metrics_by_vm, "SKU Perf by VMSS",
-        ["subscription_name", "resource_group", "vmss_name"],
-        ["Subscription", "Resource Group", "VMSS Name"], [30, 28, 28], "TblSkuByVMSS",
-    )
-    avset_vms = [v for v in vms if v.availability_set_name]
-    _sheet_sku_flat(
-        wb, avset_vms, metrics_by_vm, "SKU Perf by Availability Set",
-        ["subscription_name", "resource_group", "availability_set_name"],
-        ["Subscription", "Resource Group", "Availability Set"], [30, 28, 28], "TblSkuByAvSet",
-    )
-    _sheet_recommendations(wb, recommendations)
-    _sheet_advisor(wb, advisor or [])
-    _sheet_raw_metrics(wb, metrics)
-    _sheet_appinsights(wb, appinsights or [], appinsights_metrics or [])
-    _sheet_zone_mapping(wb, zone_mappings or [])
-    if enriched_metrics:
-        _sheet_monitoring_data(wb, enriched_metrics)
+    # Resolve legacy param aliases
+    _quota_items = quota_items or quota or []
+    _appinsights = app_insights or appinsights or []
+    _appinsights_metrics: list[Any] = appinsights_metrics or []
+
+    # Build VmMetrics dict for new-style callers (keyed by resource_id)
+    vm_metrics_dict: dict[str, VmMetrics] = {}
+    for m_list in metrics_by_vm.values():
+        for m in m_list.values():
+            vm_metrics_dict[m.resource_id] = m
+
+    # Sheet 1 — Technical Summary (SPEC: first sheet for immediate context)
+    _sheet_technical_summary(wb, findings_list, vms, enriched_list)
+    # Sheet 2 — Workload Information
+    _wi = workload_info if workload_info is not None else WorkloadInfo()
+    _sheet_workload_info(wb, _wi)
+    # Sheet 3 — Optimizations (was Decisions)
+    _sheet_decisions(wb, findings_list, advisor or [])
+    # Sheet 4 — Optimization Candidates (was Discovery Candidates)
+    _sheet_discovery_candidates(wb, findings_list)
+    # Sheet 5 — Anomalies
+    _sheet_anomalies(wb, vms, metrics_by_vm, enriched_list)
+    # Sheet 6 — Quota Posture
+    _sheet_quota(wb, _quota_items)
+    # Sheet 7 — Perf by VM - Standalone
+    standalone_vms = [
+        v for v in vms
+        if v.parent_service_type in (
+            ParentServiceType.STANDALONE,
+            ParentServiceType.STANDALONE_VMSS,
+        )
+    ]
+    sheet_perf_standalone(wb, standalone_vms, metrics_by_vm, enriched_list)
+    # Sheet 8 — Perf by VM Group per SKU
+    _groups = managed_groups or []
+    sheet_perf_group_by_sku(wb, _groups)
+    # Sheet 9 — Perf by VM SKU per Subscription
+    sheet_sku_by_subscription(wb, vms, metrics_by_vm)
+    # Sheet 10 — Perf by VM SKU per Resource Group
+    sheet_sku_by_resource_group(wb, vms, metrics_by_vm)
+    # Sheets 11-17 — Managed service sheets
+    for svc_type in (
+        ParentServiceType.AKS,
+        ParentServiceType.AVD,
+        ParentServiceType.DATABRICKS,
+        ParentServiceType.AZURE_BATCH,
+        ParentServiceType.AML,
+        ParentServiceType.ARO,
+        ParentServiceType.HDINSIGHT,
+    ):
+        svc_groups = [g for g in _groups if g.parent_service_type == svc_type]
+        sheet_managed_service(wb, svc_type, svc_groups)
+    # Sheet 18 — Resource Inventory
     _sheet_resources(wb, resources or [])
-    _sheet_reservations(wb, reservations or [])
+    # Sheet 19 — Capacity Reservations
     _sheet_capacity_reservations(wb, capacity_reservations or [])
+    # Sheet 20 — Deployment Failures
     _sheet_deployment_failures(wb, deployment_failures or [])
+    # Sheet 21 — Run Metadata
     _sheet_metadata(wb, metadata)
+    # Sheet 22 — App Insights (last per user decision)
+    _sheet_appinsights(wb, _appinsights, _appinsights_metrics)
 
     wb.save(path)
 
@@ -163,8 +245,718 @@ def read_quota_from_workbook(path: Path) -> list[QuotaItem]:
 
 
 # ---------------------------------------------------------------------------
-# Sheet 1: VM Inventory
+# Sheet 1: Technical Summary  (Phase B)
 # ---------------------------------------------------------------------------
+
+_READINESS_FILL_MAP: dict[str, Any] = {
+    "READY": _READY_FILL,
+    "LIKELY": _LIKELY_FILL,
+    "DISCOVERY": _DISCOVERY_FILL,
+    "INSUFFICIENT": _INSUFF_FILL,
+}
+
+_CONFIDENCE_FILL_MAP: dict[str, Any] = {
+    "HIGH": _HIGH_FILL,
+    "MEDIUM": _MED_FILL,
+    "LOW": _LOW_FILL,
+}
+
+
+def _sheet_technical_summary(
+    wb: Workbook,
+    findings: list[Finding],
+    vms: list[VmInventory],
+    enriched_metrics: list[EnrichedVmMetrics],
+) -> None:
+    ws = wb.create_sheet("Technical Summary")
+    ws.sheet_view.showGridLines = False
+
+    # ── Stats ────────────────────────────────────────────────────────────
+    recs       = [f for f in findings if f.finding_type == FindingType.RECOMMENDATION]
+    cands      = [f for f in findings if f.finding_type == FindingType.CANDIDATE]
+    ready_recs = [f for f in recs if f.readiness == Readiness.READY]
+    likely_recs = [f for f in recs if f.readiness == Readiness.LIKELY]
+    high_conf  = [f for f in recs if f.confidence == Confidence.HIGH]
+    high_pct   = (len(high_conf) / max(len(recs), 1)) * 100
+    categories = [c.value for c in Category]
+
+    _thin = Border(
+        left=Side(style="thin", color="BDD7EE"),
+        right=Side(style="thin", color="BDD7EE"),
+        bottom=Side(style="thin", color="BDD7EE"),
+    )
+    _f_navy  = Font(bold=True, size=12, color="1F4E79")
+    _f_green = Font(bold=True, size=12, color="375623")
+    _f_amber = Font(bold=True, size=12, color="833C00")
+    _f_grey  = Font(bold=True, size=12, color="595959")
+
+    # ── Local helpers ─────────────────────────────────────────────────────
+    def _section_header(row: int, text: str, n_cols: int = 5) -> None:
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=n_cols)
+        cell = ws.cell(row=row, column=1, value=text)
+        cell.fill = _SECTION_FILL
+        cell.font = Font(color="FFFFFF", bold=True, size=10)
+        cell.alignment = Alignment(vertical="center", horizontal="left", indent=1)
+        ws.row_dimensions[row].height = 20
+
+    def _col_header(row: int, labels: list) -> None:
+        for i, label in enumerate(labels, start=1):
+            c = ws.cell(row=row, column=i, value=label)
+            c.fill = _COL_HDR_FILL
+            c.font = Font(color="FFFFFF", bold=True, size=9)
+            c.alignment = Alignment(
+                horizontal="center" if i > 1 else "left",
+                indent=1 if i == 1 else 0,
+                vertical="center",
+            )
+        ws.row_dimensions[row].height = 18
+
+    def _kpi_row(row: int, label: str, value: Any, desc: str, vfont: Font) -> None:
+        lbl = ws.cell(row=row, column=1, value=label)
+        lbl.font = Font(size=9, color="595959")
+        lbl.fill = _BAND_FILL
+        lbl.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+        lbl.border = _thin
+
+        val = ws.cell(row=row, column=2, value=value)
+        val.font = vfont
+        val.fill = _BAND_FILL
+        val.alignment = Alignment(horizontal="right", vertical="center")
+        val.border = _thin
+
+        d = ws.cell(row=row, column=3, value=desc)
+        d.font = Font(size=9, color="7F7F7F", italic=True)
+        d.fill = _BAND_FILL
+        d.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+        d.border = _thin
+        ws.row_dimensions[row].height = 20
+
+    # ── Row 1: Title banner ───────────────────────────────────────────────
+    ws.merge_cells("A1:J1")
+    title = ws.cell(row=1, column=1, value="CLOUDOPT  ·  Technical Summary")
+    title.font = Font(bold=True, size=16, color="FFFFFF")
+    title.fill = _HDR_FILL
+    title.alignment = Alignment(vertical="center", horizontal="left", indent=2)
+    ws.row_dimensions[1].height = 30
+
+    # ── Row 2: Stats subtitle bar ─────────────────────────────────────────
+    ws.merge_cells("A2:J2")
+    subtitle = ws.cell(
+        row=2, column=1,
+        value=(
+            f"Fleet: {len(vms)} VMs   ·   {len(recs)} recommendations   ·   "
+            f"{len(ready_recs)} READY   ·   {len(likely_recs)} LIKELY   ·   "
+            f"{high_pct:.0f}% HIGH confidence"
+        ),
+    )
+    subtitle.font = Font(size=9, color="FFFFFF")
+    subtitle.fill = _SECTION_FILL
+    subtitle.alignment = Alignment(vertical="center", horizontal="left", indent=2)
+    ws.row_dimensions[2].height = 18
+
+    ws.row_dimensions[3].height = 8  # spacer
+
+    # ── Rows 4-11: Fleet Overview KPIs ───────────────────────────────────
+    _section_header(4, "  FLEET OVERVIEW")
+    _kpi_row(5,  "Fleet Size (VMs)",          len(vms),
+             "Total VMs detected across scoped subscriptions",                  _f_navy)
+    _kpi_row(6,  "Total Recommendations",     len(recs),
+             "Optimization findings generated by the detector pipeline",        _f_navy)
+    _kpi_row(7,  "Optimization Candidates",   len(cands),
+             "Potential savings requiring additional customer input",            _f_grey)
+    _kpi_row(8,  "READY Decisions",           len(ready_recs),
+             "Immediately actionable — sufficient evidence collected",          _f_green)
+    _kpi_row(9,  "LIKELY Decisions",          len(likely_recs),
+             "Likely actionable — validate with customer before committing",    _f_amber)
+    _kpi_row(10, "HIGH Confidence %",         f"{high_pct:.1f}%",
+             "Fraction of recommendations with strong supporting evidence",
+             _f_green if high_pct >= 80 else _f_amber)
+    _kpi_row(11, "Monitoring-Enriched VMs",   len(enriched_metrics),
+             "VMs with guest OS / application-level metrics available",         _f_navy)
+
+    ws.row_dimensions[12].height = 10  # spacer
+
+    # ── Rows 13-20+: Findings by Category ────────────────────────────────
+    _section_header(13, "  FINDINGS BY CATEGORY", n_cols=5)
+    _col_header(14, ["Category", "READY", "LIKELY", "DISCOVERY", "Total"])
+    cat_data_start = 15
+    for i, cat in enumerate(categories):
+        row = cat_data_start + i
+        n_ready  = sum(1 for f in recs if f.category.value == cat and f.readiness == Readiness.READY)
+        n_likely = sum(1 for f in recs if f.category.value == cat and f.readiness == Readiness.LIKELY)
+        n_disc   = sum(1 for f in recs if f.category.value == cat and f.readiness == Readiness.DISCOVERY)
+        n_total  = n_ready + n_likely + n_disc
+        bg = _ALT_FILL if i % 2 == 0 else PatternFill()
+
+        name_c = ws.cell(row=row, column=1, value=cat.capitalize())
+        name_c.fill = bg
+        name_c.font = Font(size=9)
+        name_c.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+        name_c.border = _thin
+
+        for col_idx, count, active_fill in (
+            (2, n_ready,  _READY_FILL),
+            (3, n_likely, _LIKELY_FILL),
+            (4, n_disc,   _DISCOVERY_FILL),
+        ):
+            c = ws.cell(row=row, column=col_idx, value=count)
+            c.fill = active_fill if count > 0 else bg
+            c.font = Font(size=9, bold=count > 0)
+            c.alignment = Alignment(horizontal="center", vertical="center")
+            c.border = _thin
+
+        tot_c = ws.cell(row=row, column=5, value=n_total)
+        tot_c.fill = bg
+        tot_c.font = Font(size=9, bold=True)
+        tot_c.alignment = Alignment(horizontal="center", vertical="center")
+        tot_c.border = _thin
+        ws.row_dimensions[row].height = 16
+
+    cat_data_end = cat_data_start + len(categories) - 1
+    ws.row_dimensions[cat_data_end + 1].height = 10  # spacer
+
+    # ── Confidence distribution ───────────────────────────────────────────
+    conf_hdr_row = cat_data_end + 2
+    _section_header(conf_hdr_row, "  CONFIDENCE DISTRIBUTION", n_cols=4)
+    _col_header(conf_hdr_row + 1, ["Confidence", "Count", "% of Total"])
+    conf_data_start = conf_hdr_row + 2
+    conf_items = [
+        ("HIGH",   Confidence.HIGH,   _HIGH_FILL, Font(size=9, bold=True, color="375623")),
+        ("MEDIUM", Confidence.MEDIUM, _MED_FILL,  Font(size=9, bold=True, color="833C00")),
+        ("LOW",    Confidence.LOW,    _LOW_FILL,  Font(size=9, bold=True, color="9C0006")),
+    ]
+    for i, (label, conf_enum, fill, val_font) in enumerate(conf_items):
+        row = conf_data_start + i
+        count = sum(1 for f in recs if f.confidence == conf_enum)
+        pct = (count / max(len(recs), 1)) * 100
+        for col_idx, val in enumerate([label, count, f"{pct:.0f}%"], start=1):
+            c = ws.cell(row=row, column=col_idx, value=val)
+            c.fill = fill
+            c.font = val_font
+            c.alignment = Alignment(
+                horizontal="left" if col_idx == 1 else "center",
+                indent=1 if col_idx == 1 else 0,
+                vertical="center",
+            )
+            c.border = _thin
+        ws.row_dimensions[row].height = 16
+
+    conf_data_end = conf_data_start + len(conf_items) - 1
+    ws.row_dimensions[conf_data_end + 1].height = 10  # spacer
+
+    # ── Top READY Decisions ───────────────────────────────────────────────
+    top_hdr_row = conf_data_end + 2
+    _section_header(top_hdr_row, "  TOP 10 READY DECISIONS", n_cols=5)
+    _col_header(top_hdr_row + 1, ["Code", "Category", "Resource", "Confidence", "Rationale"])
+    top_decisions = [f for f in recs if f.readiness == Readiness.READY][:10]
+    for i, f in enumerate(top_decisions):
+        row = top_hdr_row + 2 + i
+        vm_display = f.vm_id.split("/")[-1] if "/" in f.vm_id else f.vm_id
+        bg = _ALT_FILL if i % 2 == 0 else PatternFill()
+        row_vals = [
+            f.code,
+            f.category.value.capitalize(),
+            vm_display,
+            f.confidence.value if f.confidence else "",
+            f.rationale[:150] if f.rationale else "",
+        ]
+        for col_idx, val in enumerate(row_vals, start=1):
+            cell = ws.cell(row=row, column=col_idx, value=val)
+            cell.font = Font(size=9)
+            cell.fill = bg
+            cell.border = _thin
+        if f.confidence:
+            ws.cell(row=row, column=4).fill = _CONFIDENCE_FILL_MAP.get(f.confidence.value, bg)
+        ws.row_dimensions[row].height = 16
+
+    # ── Column widths ─────────────────────────────────────────────────────
+    ws.column_dimensions["A"].width = 32
+    ws.column_dimensions["B"].width = 14
+    ws.column_dimensions["C"].width = 44
+    ws.column_dimensions["D"].width = 14
+    ws.column_dimensions["E"].width = 55
+    ws.column_dimensions["F"].width = 2   # narrow gap before charts
+    ws.column_dimensions["G"].width = 2
+
+    # ── Charts ────────────────────────────────────────────────────────────
+    # Anchored at column H — completely clear of all data in columns A-E.
+    # Bar chart: Findings by Category & Readiness
+    bar = BarChart()
+    bar.type = "col"
+    bar.grouping = "clustered"
+    bar.title = "Findings by Category & Readiness"
+    bar.y_axis.title = "Count"
+    bar.width = 20
+    bar.height = 12
+    bar.style = 10
+    # Row 14 contains column headers (READY/LIKELY/DISCOVERY) → titles_from_data=True
+    bar_data_ref = Reference(ws, min_col=2, max_col=4,
+                              min_row=14, max_row=cat_data_end)
+    bar_cats_ref = Reference(ws, min_col=1,
+                              min_row=cat_data_start, max_row=cat_data_end)
+    bar.add_data(bar_data_ref, titles_from_data=True)
+    bar.set_categories(bar_cats_ref)
+    ws.add_chart(bar, "H4")
+
+    # Pie chart: Confidence distribution
+    pie = PieChart()
+    pie.title = "Recommendation Confidence"
+    pie.width = 14
+    pie.height = 11
+    pie.style = 10
+    pie_data_ref = Reference(ws, min_col=2,
+                              min_row=conf_data_start, max_row=conf_data_end)
+    pie_labs_ref = Reference(ws, min_col=1,
+                              min_row=conf_data_start, max_row=conf_data_end)
+    pie.add_data(pie_data_ref)
+    pie.set_categories(pie_labs_ref)
+    ws.add_chart(pie, "H27")
+
+
+# ---------------------------------------------------------------------------
+# Sheet 2: Decisions  (Phase B — RECOMMENDATION findings + Advisor)
+# ---------------------------------------------------------------------------
+
+_DECISIONS_COLS: list[tuple[str, int]] = [
+    ("Code",                  16),
+    ("Category",              14),
+    ("Subcategory",           18),
+    ("Status",                18),
+    ("ResourceID",            52),
+    ("Readiness",             14),
+    ("Confidence",            14),
+    ("Evidence Sources",      30),
+    ("Current",               22),
+    ("Proposed",              22),
+    ("Rationale",             50),
+    ("Blockers to High",      36),
+    ("Customer Inputs",       36),
+]
+
+
+def _sheet_decisions(
+    wb: Workbook,
+    findings: list[Finding],
+    advisor: list[AdvisorRecommendation],
+) -> None:
+    ws = wb.create_sheet("Decisions")
+    headers = [c[0] for c in _DECISIONS_COLS]
+    _write_header(ws, headers)
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}1"
+
+    recs = [f for f in findings if f.finding_type == FindingType.RECOMMENDATION]
+    # Sort: READY first, then LIKELY, then by category
+    readiness_order = {Readiness.READY: 0, Readiness.LIKELY: 1, Readiness.DISCOVERY: 2,
+                       Readiness.INSUFFICIENT: 3}
+    recs = sorted(recs, key=lambda f: (readiness_order.get(f.readiness, 9), f.category.value))
+
+    for row_idx, f in enumerate(recs, start=2):
+        alt = row_idx % 2 == 0
+        vm_display = mask_subscription_ids_in_string(f.vm_id) if "/" in f.vm_id else f.vm_id
+        row_vals = [
+            f.code,
+            f.category.value,
+            f.subcategory.value if hasattr(f.subcategory, "value") else str(f.subcategory),
+            "CSA to Review",
+            vm_display,
+            f.readiness.value,
+            f.confidence.value if f.confidence else "",
+            " | ".join(f.evidence_sources),
+            f.current or "",
+            f.proposed or "",
+            f.rationale or "",
+            " | ".join(f.blockers_to_high),
+            " | ".join(f.customer_inputs_needed),
+        ]
+        for col_idx, val in enumerate(row_vals, start=1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=val)
+            cell.border = _THIN_BORDER
+            cell.font = Font(size=9)
+            cell.alignment = Alignment(vertical="top", wrap_text=False)
+            # Colour-code Status col (4), Readiness col (6), Confidence col (7)
+            if col_idx == 4:
+                cell.fill = _CSA_FILL
+            elif col_idx == 6:
+                cell.fill = _READINESS_FILL_MAP.get(f.readiness.value, PatternFill())
+            elif col_idx == 7 and f.confidence:
+                cell.fill = _CONFIDENCE_FILL_MAP.get(f.confidence.value, PatternFill())
+            elif alt:
+                cell.fill = _ALT_FILL
+
+    decisions_data_end = len(recs) + 1
+    if decisions_data_end >= 1:
+        _add_table(ws, "TblDecisions", decisions_data_end)
+
+    # Advisor section (appended below a separator row)
+    if advisor:
+        sep_row = decisions_data_end + 3
+        ws.cell(row=sep_row, column=1, value="Advisor SKU Recommendations").font = Font(
+            bold=True, size=10, color="1F4E79")
+        adv_hdr_row = sep_row + 1
+        for idx, hdr in enumerate(
+            ["Impact", "Description", "Current SKU", "Recommended SKU",
+             "Subscription", "Resource ID"],
+            start=1,
+        ):
+            c = ws.cell(row=adv_hdr_row, column=idx, value=hdr)
+            c.fill = _HDR_FILL
+            c.font = _HDR_FONT
+        for i, rec in enumerate(advisor):
+            row = adv_hdr_row + 1 + i
+            alt = i % 2 == 0
+            for col_idx, val in enumerate([
+                getattr(rec, "impact", "") or "",
+                getattr(rec, "short_description", "") or "",
+                getattr(rec, "current_sku", "") or "",
+                getattr(rec, "target_sku", "") or "",
+                getattr(rec, "subscription_name", "") or "",
+                mask_subscription_ids_in_string(getattr(rec, "resource_id", "") or ""),
+            ], start=1):
+                cell = ws.cell(row=row, column=col_idx, value=val)
+                cell.font = Font(size=9)
+                if alt:
+                    cell.fill = _ALT_FILL
+
+    for col_idx, (_, width) in enumerate(_DECISIONS_COLS, start=1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+
+# ---------------------------------------------------------------------------
+# Sheet 3: Discovery Candidates  (Phase B)
+# ---------------------------------------------------------------------------
+
+_CANDIDATE_COLS: list[tuple[str, int]] = [
+    ("Code",                  16),
+    ("Category",              14),
+    ("Subcategory",           18),
+    ("ResourceID",            52),
+    ("Rationale",             60),
+    ("Customer Inputs Needed", 50),
+]
+
+
+def _sheet_discovery_candidates(wb: Workbook, findings: list[Finding]) -> None:
+    ws = wb.create_sheet("Discovery Candidates")
+    headers = [c[0] for c in _CANDIDATE_COLS]
+    _write_header(ws, headers)
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}1"
+
+    candidates = [f for f in findings if f.finding_type == FindingType.CANDIDATE]
+    candidates = sorted(candidates, key=lambda f: f.category.value)
+
+    for row_idx, f in enumerate(candidates, start=2):
+        alt = row_idx % 2 == 0
+        vm_display = mask_subscription_ids_in_string(f.vm_id) if "/" in f.vm_id else f.vm_id
+        row_vals = [
+            f.code,
+            f.category.value,
+            f.subcategory.value if hasattr(f.subcategory, "value") else str(f.subcategory),
+            vm_display,
+            f.rationale or "",
+            " | ".join(f.customer_inputs_needed),
+        ]
+        for col_idx, val in enumerate(row_vals, start=1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=val)
+            cell.border = _THIN_BORDER
+            cell.font = Font(size=9)
+            cell.alignment = Alignment(vertical="top", wrap_text=False)
+            if alt:
+                cell.fill = _ALT_FILL
+
+    _add_table(ws, "TblCandidates", len(candidates))
+
+    for col_idx, (_, width) in enumerate(_CANDIDATE_COLS, start=1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+
+# ---------------------------------------------------------------------------
+# Sheet 4: Evidence  (Phase B — replaces Performance Summary)
+# ---------------------------------------------------------------------------
+
+_EVIDENCE_METRICS = [
+    ("Avg CPU %",         "Percentage CPU",             "avg"),
+    ("P95 CPU %",         "Percentage CPU",             "p95"),
+    ("Avg Mem Avail (GB)", "Available Memory Bytes",    "avg"),
+    ("Disk Read IOps",    "Disk Read Operations/Sec",   "avg"),
+    ("Disk Write IOps",   "Disk Write Operations/Sec",  "avg"),
+]
+
+
+def _sheet_evidence(
+    wb: Workbook,
+    vms: list[VmInventory],
+    metrics_by_vm: dict[str, dict[str, VmMetrics]],
+    findings: list[Finding],
+) -> None:
+    ws = wb.create_sheet("Evidence")
+
+    # Build a lookup: resource_id → list[Finding code]
+    vm_findings: dict[str, list[str]] = {}
+    vm_evidence: dict[str, set[str]] = {}
+    vm_confidence: dict[str, str] = {}
+    for f in findings:
+        vm_findings.setdefault(f.vm_id, []).append(f.code)
+        vm_evidence.setdefault(f.vm_id, set()).update(f.evidence_sources)
+        # Highest confidence per VM (HIGH > MEDIUM > LOW)
+        conf_order = {"HIGH": 3, "MEDIUM": 2, "LOW": 1}
+        if f.confidence:
+            existing = vm_confidence.get(f.vm_id, "")
+            if conf_order.get(f.confidence.value, 0) > conf_order.get(existing, 0):
+                vm_confidence[f.vm_id] = f.confidence.value
+
+    static_hdrs = ["VM Name", "Subscription", "Resource Group", "VM SKU", "vCPUs", "Mem (GB)"]
+    metric_hdrs = [m[0] for m in _EVIDENCE_METRICS]
+    extra_hdrs = ["Finding Codes", "Evidence Sources", "Best Confidence"]
+    headers = static_hdrs + metric_hdrs + extra_hdrs
+    _write_header(ws, headers)
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}1"
+
+    for row_idx, vm in enumerate(vms, start=2):
+        alt = row_idx % 2 == 0
+        vm_met = metrics_by_vm.get(vm.resource_id, {})
+        row_data: list[Any] = [
+            vm.vm_name, vm.subscription_name, vm.resource_group,
+            vm.vm_sku, vm.vcpus, vm.memory_gb,
+        ]
+        for _, metric_name, stat in _EVIDENCE_METRICS:
+            m = vm_met.get(metric_name)
+            val: float | None = getattr(m, stat, None) if m else None
+            if val is not None and metric_name == "Available Memory Bytes":
+                val = round(val / (1024 ** 3), 2)
+            row_data.append(val)
+
+        codes_str = " | ".join(vm_findings.get(vm.resource_id, []))
+        sources_str = " | ".join(sorted(vm_evidence.get(vm.resource_id, set())))
+        conf_str = vm_confidence.get(vm.resource_id, "")
+        row_data.extend([codes_str, sources_str, conf_str])
+
+        for col_idx, value in enumerate(row_data, start=1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+            cell.border = _THIN_BORDER
+            cell.font = Font(size=9)
+            if alt:
+                cell.fill = _ALT_FILL
+            # Colour CPU columns (positions 7-8 in 1-indexed)
+            if col_idx == 7 and isinstance(value, float):
+                _colour_util(cell, value)
+
+    _add_table(ws, "TblEvidence", len(vms))
+
+    widths = [28, 26, 24, 20, 8, 10, 12, 12, 16, 12, 12, 36, 36, 16]
+    for col_idx, width in enumerate(widths, start=1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+
+# ---------------------------------------------------------------------------
+# Sheet 8: Source Coverage  (Phase B)
+# ---------------------------------------------------------------------------
+
+def _sheet_source_coverage(
+    wb: Workbook,
+    vms: list[VmInventory],
+    enriched_metrics: list[EnrichedVmMetrics],
+) -> None:
+    ws = wb.create_sheet("Source Coverage")
+
+    # Build lookup: vm_name (lower) → EnrichedVmMetrics
+    enriched_by_name: dict[str, EnrichedVmMetrics] = {
+        e.vm_name.lower(): e for e in enriched_metrics
+    }
+
+    headers = [
+        "VM Name", "VM SKU", "Subscription", "Resource Group",
+        "Source Tool", "Confidence Tier", "Has OS Data",
+        "Has JVM Data", "Has .NET Data", "Has SQL Data", "Data Points",
+    ]
+    _write_header(ws, headers)
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}1"
+
+    for row_idx, vm in enumerate(vms, start=2):
+        alt = row_idx % 2 == 0
+        enriched = enriched_by_name.get(vm.vm_name.lower())
+        if enriched:
+            source_tool = enriched.source_tool
+            tier = enriched.confidence_tier
+            has_os = "Yes" if enriched.has_os_data else "No"
+            has_jvm = "Yes" if enriched.has_jvm_data else "No"
+            has_dotnet = "Yes" if enriched.has_dotnet_data else "No"
+            has_sql = "Yes" if enriched.has_sql_data else "No"
+            data_pts = len(enriched.data_points)
+        else:
+            source_tool = "Platform only"
+            tier = "platform-only"
+            has_os = has_jvm = has_dotnet = has_sql = "No"
+            data_pts = 0
+
+        row_vals = [
+            vm.vm_name, vm.vm_sku, vm.subscription_name, vm.resource_group,
+            source_tool, tier, has_os, has_jvm, has_dotnet, has_sql, data_pts,
+        ]
+        for col_idx, val in enumerate(row_vals, start=1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=val)
+            cell.border = _THIN_BORDER
+            cell.font = Font(size=9)
+            if alt:
+                cell.fill = _ALT_FILL
+            # Colour-code Confidence Tier (col 6)
+            if col_idx == 6:
+                if tier == "workload-aware":
+                    cell.fill = _HIGH_FILL
+                elif tier == "os-aware":
+                    cell.fill = _MED_FILL
+                else:
+                    cell.fill = _LOW_FILL
+
+    _add_table(ws, "TblSourceCoverage", len(vms))
+
+    for col_idx, width in enumerate([28, 20, 26, 24, 18, 18, 12, 12, 12, 12, 12], start=1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+
+# ---------------------------------------------------------------------------
+# Sheet 9: Anomalies  (Phase B — platform vs external disagreements)
+# ---------------------------------------------------------------------------
+
+_ANOMALY_THRESHOLD_PCT: float = 10.0
+
+
+def _sheet_anomalies(
+    wb: Workbook,
+    vms: list[VmInventory],
+    metrics_by_vm: dict[str, dict[str, VmMetrics]],
+    enriched_metrics: list[EnrichedVmMetrics],
+) -> None:
+    ws = wb.create_sheet("Anomalies")
+
+    headers = [
+        "VM Name", "VM SKU", "Subscription", "Resource Group",
+        "Metric", "Platform Avg", "External Avg", "Delta (pts)", "Interpretation",
+    ]
+    _write_header(ws, headers)
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}1"
+
+    enriched_by_name: dict[str, EnrichedVmMetrics] = {
+        e.vm_name.lower(): e for e in enriched_metrics
+    }
+
+    # Compare pairs: platform CPU % vs os.cpu.percent, mem available vs os.memory.used_percent
+    _comparisons: list[tuple[str, str, str, str]] = [
+        # (display_name, platform_metric, ext_metric, direction)
+        ("CPU %", "Percentage CPU", "os.cpu.percent", "both"),
+    ]
+
+    row_idx = 2
+    for vm in vms:
+        enriched = enriched_by_name.get(vm.vm_name.lower())
+        if not enriched:
+            continue
+        vm_met = metrics_by_vm.get(vm.resource_id, {})
+        ext_lookup: dict[str, Any] = {dp.metric_name: dp for dp in enriched.data_points}
+
+        for display, plat_name, ext_name, _ in _comparisons:
+            plat_m = vm_met.get(plat_name)
+            ext_dp = ext_lookup.get(ext_name)
+            if plat_m is None or ext_dp is None:
+                continue
+            plat_val = plat_m.avg
+            ext_val = ext_dp.avg_value
+            if plat_val is None or ext_val is None:
+                continue
+            delta = abs(plat_val - ext_val)
+            if delta < _ANOMALY_THRESHOLD_PCT:
+                continue
+            direction = (
+                "Platform higher — check agent coverage"
+                if plat_val > ext_val
+                else "External higher — check platform metric gap"
+            )
+            alt = row_idx % 2 == 0
+            for col_idx, val in enumerate([
+                vm.vm_name, vm.vm_sku, vm.subscription_name, vm.resource_group,
+                display,
+                round(plat_val, 2), round(ext_val, 2), round(delta, 2),
+                direction,
+            ], start=1):
+                cell = ws.cell(row=row_idx, column=col_idx, value=val)
+                cell.border = _THIN_BORDER
+                cell.font = Font(size=9)
+                if alt:
+                    cell.fill = _ALT_FILL
+                if col_idx == 8:
+                    cell.fill = _RED_FILL if delta >= 20 else _YELLOW_FILL
+            row_idx += 1
+
+    data_rows = row_idx - 2
+    if data_rows > 0:
+        _add_table(ws, "TblAnomalies", data_rows)
+
+    for col_idx, width in enumerate([28, 20, 26, 24, 14, 14, 14, 14, 40], start=1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+
+# ---------------------------------------------------------------------------
+# Sheet 10: Data Gap Register  (Phase B — VMs with no external enrichment)
+# ---------------------------------------------------------------------------
+
+def _sheet_data_gap_register(
+    wb: Workbook,
+    vms: list[VmInventory],
+    enriched_metrics: list[EnrichedVmMetrics],
+) -> None:
+    ws = wb.create_sheet("Data Gap Register")
+
+    headers = [
+        "VM Name", "VM SKU", "Subscription", "Resource Group", "Region",
+        "Gap Reason", "Uplift Action",
+    ]
+    _write_header(ws, headers)
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}1"
+
+    enriched_names: set[str] = {e.vm_name.lower() for e in enriched_metrics}
+    os_aware_names: set[str] = {
+        e.vm_name.lower() for e in enriched_metrics if e.has_os_data
+    }
+
+    row_idx = 2
+    for vm in vms:
+        vn = vm.vm_name.lower()
+        if vn in os_aware_names:
+            continue  # has OS data — not a gap (may still be MEDIUM if no workload metrics)
+        alt = row_idx % 2 == 0
+        if vn not in enriched_names:
+            gap_reason = "No external monitoring data — platform metrics only"
+            uplift = "Install monitoring agent + export canonical CSV"
+        else:
+            gap_reason = "External data present but no OS-level metrics"
+            uplift = "Verify agent has os.* metric collection enabled"
+
+        for col_idx, val in enumerate([
+            vm.vm_name, vm.vm_sku, vm.subscription_name, vm.resource_group, vm.region,
+            gap_reason, uplift,
+        ], start=1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=val)
+            cell.border = _THIN_BORDER
+            cell.font = Font(size=9)
+            if alt:
+                cell.fill = _ALT_FILL
+        row_idx += 1
+
+    data_rows = row_idx - 2
+    if data_rows > 0:
+        _add_table(ws, "TblDataGap", data_rows)
+
+    for col_idx, width in enumerate([28, 20, 26, 24, 16, 48, 48], start=1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+
+# ---------------------------------------------------------------------------
+# Sheet 11: Fleet Inventory  (renamed from VM Inventory)
 
 _INVENTORY_COLS: list[tuple[str, str, int]] = [
     # (header, field_name_or_special, width)
@@ -203,7 +995,7 @@ _CSA_START_COL = 23  # first analyst-editable column (1-indexed); shifts when co
 
 
 def _sheet_inventory(wb: Workbook, vms: list[VmInventory]) -> None:
-    ws = wb.create_sheet("VM Inventory")
+    ws = wb.create_sheet("Fleet Inventory")
 
     headers = [c[0] for c in _INVENTORY_COLS]
     _write_header(ws, headers)
@@ -535,12 +1327,14 @@ _QUOTA_COLS = [
     ("Utilization %", 14),
     ("30d Peak %", 12),
     ("Alloc. Failures (30d)", 22),
+    ("PAYG Default", 14),
+    ("Raised?", 10),
     ("Alert", 8),
 ]
 
 
 def _sheet_quota(wb: Workbook, quota_items: list[QuotaItem]) -> None:
-    ws = wb.create_sheet("Quota Utilization")
+    ws = wb.create_sheet("Quota Posture")
     headers = [c[0] for c in _QUOTA_COLS]
     _write_header(ws, headers)
     ws.freeze_panes = "A2"
@@ -558,6 +1352,11 @@ def _sheet_quota(wb: Workbook, quota_items: list[QuotaItem]) -> None:
             item.utilization_pct,
             item.peak_usage_pct_30d,
             item.allocation_failures_30d if item.allocation_failures_30d else "",
+            item.subscription_default if item.subscription_default is not None else "",
+            "\u2713" if (
+                item.subscription_default is not None
+                and item.quota_limit > item.subscription_default
+            ) else "",
             "YES" if item.alert else "",
         ]
         for col_idx, val in enumerate(row_data, start=1):
@@ -569,6 +1368,9 @@ def _sheet_quota(wb: Workbook, quota_items: list[QuotaItem]) -> None:
                 cell.fill = _RED_FILL
             elif item.allocation_failures_30d > 0 and col_idx == 9:
                 cell.fill = _RED_FILL
+            elif col_idx == 10 and isinstance(val, int) and val == 0:
+                # Highlight zero PAYG default (e.g. restricted GPU family)
+                cell.fill = _YELLOW_FILL
             elif alt:
                 cell.fill = _ALT_FILL
         # Colour-code utilization % cell (col 7)
@@ -588,9 +1390,11 @@ def _sheet_quota(wb: Workbook, quota_items: list[QuotaItem]) -> None:
 
 
 def _read_quota_sheet(wb) -> list[QuotaItem]:
-    # Support both old ("Quota Utilisation") and new ("Quota Utilization") sheet names
+    # Support Phase B name ("Quota Posture"), original ("Quota Utilization"), and old typo
     sheet_name = next(
-        (n for n in ("Quota Utilization", "Quota Utilisation") if n in wb.sheetnames), None
+        (n for n in ("Quota Posture", "Quota Utilization", "Quota Utilisation")
+         if n in wb.sheetnames),
+        None,
     )
     if sheet_name is None:
         return []
@@ -602,21 +1406,30 @@ def _read_quota_sheet(wb) -> list[QuotaItem]:
     header = [str(c or "").strip() for c in rows[0]]
     has_peak = "30d Peak %" in header
     has_failures = "Alloc. Failures (30d)" in header
+    has_payg = "PAYG Default" in header
     items: list[QuotaItem] = []
     for row in rows[1:]:
         if not any(row):
             continue
         try:
-            if has_peak and has_failures:
-                # New 10-column layout
+            if has_payg:
+                # New 12-column layout: PAYG Default at [9], Raised? at [10], Alert at [11]
+                alert_val = str(row[11] or "").upper()
+                peak = float(row[7]) if row[7] is not None else None
+                failures = int(row[8] or 0)
+                payg_default = int(row[9]) if row[9] is not None and row[9] != "" else None
+            elif has_peak and has_failures:
+                # 10-column layout
                 alert_val = str(row[9] or "").upper()
                 peak = float(row[7]) if row[7] is not None else None
                 failures = int(row[8] or 0)
+                payg_default = None
             else:
                 # Legacy 8-column layout
                 alert_val = str(row[7] or "").upper()
                 peak = None
                 failures = 0
+                payg_default = None
             items.append(
                 QuotaItem(
                     subscription_id="",
@@ -630,6 +1443,7 @@ def _read_quota_sheet(wb) -> list[QuotaItem]:
                     alert=(alert_val == "YES"),
                     peak_usage_pct_30d=peak,
                     allocation_failures_30d=failures,
+                    subscription_default=payg_default,
                 )
             )
         except Exception:
@@ -732,6 +1546,44 @@ def _sheet_appinsights(
             if isinstance(value, float) and col_i > 7:
                 cell.number_format = "#,##0.00"
 
+        # Pre-compute failed request ratio for availability highlighting
+        _req_count_m  = comp_metrics.get("requests/count")
+        _req_failed_m = comp_metrics.get("requests/failed")
+        _failed_ratio: float | None = None
+        if (
+            _req_count_m and _req_failed_m
+            and _req_count_m.avg and _req_count_m.avg > 0
+        ):
+            _failed_ratio = (_req_failed_m.avg or 0.0) / _req_count_m.avg
+
+        # Apply per-metric highlighting (overrides alt-row fill)
+        _metric_col_start = 8  # columns 1-7 are static fields
+        for _met_i, (_m_name, _) in enumerate(METRIC_COLS):
+            _col_i = _metric_col_start + _met_i
+            _val   = metric_avgs[_met_i]
+            if _val is None:
+                continue
+            _hl: Any = None
+            if _m_name == "availabilityResults/availabilityPercentage":
+                if _val < 95:
+                    _hl = _RED_FILL
+                elif _val < 99:
+                    _hl = _YELLOW_FILL
+            elif _m_name == "requests/duration":
+                if _val > 5000:
+                    _hl = _RED_FILL
+                elif _val > 2000:
+                    _hl = _YELLOW_FILL
+            elif _m_name == "requests/failed" and _failed_ratio is not None:
+                if _failed_ratio > 0.05:
+                    _hl = _RED_FILL
+                elif _failed_ratio > 0.01:
+                    _hl = _YELLOW_FILL
+            elif _m_name == "exceptions/count" and _val > 0:
+                _hl = _YELLOW_FILL
+            if _hl is not None:
+                ws.cell(row=row_i, column=_col_i).fill = _hl
+
     if components:
         tbl_ref = f"A1:{get_column_letter(len(headers))}{len(components) + 1}"
         tbl = Table(displayName="TblAppInsights", ref=tbl_ref)
@@ -755,8 +1607,6 @@ _WORKLOAD_ROWS: list[tuple[str, str]] = [
     ("SLA",                            "sla"),
     ("RPO",                            "rpo"),
     ("RTO",                            "rto"),
-    ("Top 2 Challenge/Pain point",     "challenge_2"),
-    ("Top 3 Challenge/Pain point",     "challenge_3"),
 ]
 
 
@@ -1000,7 +1850,7 @@ _RESOURCES_COLS: list[tuple[str, str, int]] = [
 
 
 def _sheet_resources(wb: Workbook, resources: list[AzureResource]) -> None:
-    ws = wb.create_sheet("Inventory")
+    ws = wb.create_sheet("Resource Inventory")
     headers = [c[0] for c in _RESOURCES_COLS]
     _write_header(ws, headers)
     ws.freeze_panes = "A2"
@@ -1033,7 +1883,7 @@ def _sheet_resources(wb: Workbook, resources: list[AzureResource]) -> None:
 # ---------------------------------------------------------------------------
 
 def _sheet_metadata(wb: Workbook, metadata: CollectionMetadata) -> None:
-    ws = wb.create_sheet("Collection Metadata")
+    ws = wb.create_sheet("Run Metadata")
     ws.column_dimensions["A"].width = 36
     ws.column_dimensions["B"].width = 50
 
@@ -1107,63 +1957,6 @@ def _sheet_metadata(wb: Workbook, metadata: CollectionMetadata) -> None:
             r_cell.fill = _CHECKED_FILL
         m_cell.font = Font(size=9, bold=checked)
         r_cell.font = Font(size=9)
-
-
-# ---------------------------------------------------------------------------
-# Sheet: Reservations (RI / Savings Plans — counts, dates, percentages only)
-# No $ / cost columns anywhere (SPEC §1.2).
-# ---------------------------------------------------------------------------
-
-_RSV_COLS: list[tuple[str, int]] = [
-    ("Order ID (masked)",      40),
-    ("Display Name",           35),
-    ("SKU",                    22),
-    ("Region",                 18),
-    ("Term",                   10),
-    ("Expiry Date",            14),
-    ("Reserved Count",         16),
-    ("Applied Scope Type",     20),
-    ("Utilization (%)",        16),
-]
-
-
-def _sheet_reservations(wb: Workbook, reservations: list[ReservationOrder]) -> None:
-    ws = wb.create_sheet("Reservations")
-
-    # Header row
-    for col_idx, (label, _) in enumerate(_RSV_COLS, start=1):
-        cell = ws.cell(row=1, column=col_idx, value=label)
-        cell.fill = _HDR_FILL
-        cell.font = _HDR_FONT
-        cell.alignment = Alignment(horizontal="left")
-        cell.border = _THIN_BORDER
-
-    for row_idx, r in enumerate(reservations, start=2):
-        vals: list[Any] = [
-            r.masked_applied_scope_ids()[0] if r.applied_scope_ids else r.order_id,
-            r.display_name,
-            r.sku_name,
-            r.region,
-            r.term,
-            r.expiry_date,
-            r.reserved_count,
-            r.applied_scope_type,
-            r.utilization_pct,
-        ]
-        alt = row_idx % 2 == 0
-        for col_idx, val in enumerate(vals, start=1):
-            cell = ws.cell(row=row_idx, column=col_idx, value=val)
-            cell.border = _THIN_BORDER
-            cell.font = Font(size=9)
-            cell.alignment = Alignment(vertical="top", wrap_text=False)
-            if alt:
-                cell.fill = _ALT_FILL
-
-    for col_idx, (_, width) in enumerate(_RSV_COLS, start=1):
-        ws.column_dimensions[get_column_letter(col_idx)].width = width
-
-    if reservations:
-        _add_table(ws, "TblReservations", len(reservations))
 
 
 # ---------------------------------------------------------------------------
@@ -1316,9 +2109,13 @@ def _sheet_deployment_failures(
 # ---------------------------------------------------------------------------
 
 def _read_inventory_sheet(wb) -> list[VmInventory]:
-    if "VM Inventory" not in wb.sheetnames:
+    # Support Phase C "Resource Inventory", Phase B "Fleet Inventory", and legacy "VM Inventory"
+    sheet_name = next(
+        (n for n in ("Fleet Inventory", "VM Inventory", "Resource Inventory") if n in wb.sheetnames), None
+    )
+    if sheet_name is None:
         return []
-    ws = wb["VM Inventory"]
+    ws = wb[sheet_name]
     rows = list(ws.iter_rows(values_only=True))
     if len(rows) < 2:
         return []
@@ -1376,7 +2173,10 @@ def _read_inventory_sheet(wb) -> list[VmInventory]:
 
 
 def _read_raw_metrics_sheet(wb) -> list[VmMetrics]:
-    """Read the Raw Metrics sheet back into VmMetrics objects (no time series)."""
+    """Read the Raw Metrics sheet back into VmMetrics objects (no time series).
+
+    Returns an empty list when the Raw Metrics sheet is absent (dropped in Phase B).
+    """
     if "Raw Metrics" not in wb.sheetnames:
         return []
     ws = wb["Raw Metrics"]
@@ -1405,9 +2205,12 @@ def _read_raw_metrics_sheet(wb) -> list[VmMetrics]:
 
 
 def _read_recommendations_sheet(wb) -> list[VmRecommendation]:
-    if "Optimizations" not in wb.sheetnames:
+    # Support both Phase B "Decisions" table and legacy "Optimizations" sheet.
+    # Phase B "Decisions" uses Finding fields; map the overlapping columns for
+    # backward-compatible dashboard loading (best-effort).
+    if "Optimizations" not in wb.sheetnames and "Decisions" not in wb.sheetnames:
         return []
-    ws = wb["Optimizations"]
+    ws = wb["Optimizations"] if "Optimizations" in wb.sheetnames else wb["Decisions"]
     rows = list(ws.iter_rows(values_only=True))
     if len(rows) < 2:
         return []
@@ -1447,13 +2250,17 @@ def _read_recommendations_sheet(wb) -> list[VmRecommendation]:
 def _read_metadata_sheet(wb) -> CollectionMetadata:
     from cloudopt.models import CollectionMetadata, CollectionThresholds
 
-    if "Collection Metadata" not in wb.sheetnames:
+    # Support both Phase B "Run Metadata" and legacy "Collection Metadata"
+    sheet_name = next(
+        (n for n in ("Run Metadata", "Collection Metadata") if n in wb.sheetnames), None
+    )
+    if sheet_name is None:
         return CollectionMetadata(
             run_date="", tool_version="", subscriptions_scanned=[],
             metrics_period_days=30, total_vm_count=0,
             thresholds=CollectionThresholds(),
         )
-    ws = wb["Collection Metadata"]
+    ws = wb[sheet_name]
     kv: dict[str, Any] = {}
     for row in ws.iter_rows(values_only=True):
         if row[0] and row[1] is not None:

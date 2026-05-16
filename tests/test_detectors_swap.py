@@ -1,4 +1,4 @@
-"""Tests for detectors.swap (SWP-FAM-001, SWP-LFC-001, SWP-ARC-001)."""
+"""Tests for detectors.swap (SWP-FAM-001, SWP-LFC-001)."""
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -97,14 +97,11 @@ class TestSwpLfc001:
 
 
 class TestSwpArc001:
-    def test_eligible_v5_sku_emits_arc_candidate(self):
+    def test_arc_001_not_emitted(self):
+        """SWP-ARC-001 was removed; verify it is never produced."""
         vm = _vm(sku="Standard_D8s_v5")
         findings = swap.detect([vm], [], [], _T, _catalog())
-        arc = [f for f in findings if f.code == "SWP-ARC-001"]
-        assert arc
-        # Must be CANDIDATE finding type
-        from cloudopt.analyzer.taxonomy import FindingType
-        assert arc[0].finding_type == FindingType.CANDIDATE
+        assert all(f.code != "SWP-ARC-001" for f in findings)
 
     def test_already_arm64_skips_arc(self):
         vm = _vm(sku="Standard_D8ps_v5")

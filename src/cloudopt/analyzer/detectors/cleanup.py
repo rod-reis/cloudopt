@@ -89,7 +89,7 @@ def _check_disk(r: AzureResource) -> Finding | None:
             "has no managed_by reference — it is not attached to any VM. "
             "Review and delete to reduce storage costs."
         ),
-        **_rec_kwargs(),
+        **_rec_kwargs(category=Category.CLEANUP),
     )
 
 
@@ -108,7 +108,7 @@ def _check_nic(r: AzureResource) -> Finding | None:
             "has no managed_by reference — it may not be attached to any VM. "
             "Review and delete if no longer needed."
         ),
-        **_rec_kwargs(),
+        **_rec_kwargs(category=Category.CLEANUP),
     )
 
 
@@ -127,7 +127,7 @@ def _check_pip(r: AzureResource) -> Finding | None:
             "has no managed_by reference — it may be unassociated. "
             "Review and release to avoid idle IP charges."
         ),
-        **_rec_kwargs(),
+        **_rec_kwargs(category=Category.CLEANUP),
     )
 
 
