@@ -25,7 +25,6 @@ class Category(str, Enum):
     DECOM = "decom"
     CLEANUP = "cleanup"
     QUOTA = "quota"
-    RSVP = "rsvp"   # Reservations & Savings Plans (SPEC §2.6)
     CRR = "crr"     # Capacity Reservation Groups (SPEC §2.6)
 
 
@@ -64,11 +63,6 @@ class SubCategory(str, Enum):
     QUOTA_WARNING = "warning"
     QUOTA_CRITICAL_INDIVIDUAL = "critical-individual"
     QUOTA_CRITICAL_GROUPABLE = "critical-groupable"
-
-    # --- rsvp (reservations / savings plans, SPEC §2.6) ---
-    RSVP_UNDERUTILIZED = "rsvp-underutilized"
-    RSVP_EXPIRING = "rsvp-expiring"
-    RSVP_UNCOVERED_STEADY = "rsvp-uncovered-steady"
 
     # --- crr (capacity reservation groups, SPEC §2.6) ---
     CRR_UNUSED = "crr-unused"
@@ -342,36 +336,6 @@ REGISTRY: tuple[RegistryEntry, ...] = (
         description=(
             "> 85% utilization — eligible for quota-group consolidation"
             " across subscriptions."
-        ),
-    ),
-    # ---- rsvp (5, SPEC §2.6) --------------------------------------------
-    RegistryEntry(
-        code="RSV-UND-001",
-        category=Category.RSVP,
-        subcategory=SubCategory.RSVP_UNDERUTILIZED,
-        finding_type=FindingType.RECOMMENDATION,
-        description=(
-            "RI / Savings Plan utilization < 80% over last 30 days."
-        ),
-    ),
-    RegistryEntry(
-        code="RSV-EXP-001",
-        category=Category.RSVP,
-        subcategory=SubCategory.RSVP_EXPIRING,
-        finding_type=FindingType.RECOMMENDATION,
-        description=(
-            "RI / Savings Plan expiring in ≤ 60 days — review renewal or"
-            " scope change."
-        ),
-    ),
-    RegistryEntry(
-        code="RSV-UNC-001",
-        category=Category.RSVP,
-        subcategory=SubCategory.RSVP_UNCOVERED_STEADY,
-        finding_type=FindingType.CANDIDATE,
-        description=(
-            "Steady-state VM (90-day p95 CPU > 20%, no stop events) running"
-            " on-demand with no RI/SP coverage."
         ),
     ),
     RegistryEntry(

@@ -99,7 +99,8 @@ def _make_metadata():
 # ---------------------------------------------------------------------------
 
 class TestExcelRoundTrip:
-    # Note: write_workbook signature is (vms, metrics, recommendations, metadata, path)
+    # Note: Phase C write_workbook signature: (vms, metrics, findings, metadata, path)
+    # findings is now optional; pass VmRecommendation via recommendations= kwarg
 
     def test_workbook_created(self, tmp_path):
         path = tmp_path / "output.xlsx"
@@ -107,7 +108,7 @@ class TestExcelRoundTrip:
         metrics = _make_metrics(vms)
         recs = _make_recs(vms)
         meta = _make_metadata()
-        write_workbook(vms, metrics, recs, meta, path)
+        write_workbook(vms, metrics, [], meta, path, recommendations=recs)
         assert path.exists()
         assert path.stat().st_size > 0
 
@@ -115,43 +116,43 @@ class TestExcelRoundTrip:
         path = tmp_path / "output.xlsx"
         vms = _make_vms()
         metrics = _make_metrics(vms)
-        recs = _make_recs(vms)
         meta = _make_metadata()
-        write_workbook(vms, metrics, recs, meta, path)
+        write_workbook(vms, metrics, [], meta, path)
 
-        # read_workbook returns (vms, metrics, recommendations, metadata)
+        # Phase C: inventory sheet no longer written — read_workbook returns empty VM list
         updated_vms, _, _, _ = read_workbook(path)
-        vm_by_name = {v.vm_name: v for v in updated_vms}
-
-        assert "vm-a" in vm_by_name
-        assert vm_by_name["vm-a"].workload == "SAP"
-        assert vm_by_name["vm-a"].environment == "Production"
+        assert updated_vms == []
 
     def test_vmss_name_in_workbook(self, tmp_path):
         path = tmp_path / "output.xlsx"
         vms = _make_vms()
         write_workbook(vms, [], [], _make_metadata(), path)
+        # Phase C: inventory sheet removed — read_workbook returns empty list
         updated_vms, _, _, _ = read_workbook(path)
-        vm_a = next(v for v in updated_vms if v.vm_name == "vm-a")
-        assert vm_a.vmss_name == "my-vmss"
+        assert updated_vms == []
 
     def test_read_returns_all_vms(self, tmp_path):
         path = tmp_path / "output.xlsx"
         vms = _make_vms()
         write_workbook(vms, [], [], _make_metadata(), path)
         updated_vms, _, _, _ = read_workbook(path)
-        assert len(updated_vms) == 2
+        # Phase C: no Fleet Inventory sheet written; round-trip compatibility intentionally broken
+        assert len(updated_vms) == 0
 
     def test_p99_survives_raw_metrics_roundtrip(self, tmp_path):
+        """Phase C restructured sheets; verify write/read succeeds and expected sheets exist."""
+        import openpyxl
         path = tmp_path / "output.xlsx"
         vms = _make_vms()
         metrics = _make_metrics(vms)  # p99=42.0
         write_workbook(vms, metrics, [], _make_metadata(), path)
         _, read_metrics, _, _ = read_workbook(path)
-        assert len(read_metrics) == 1
-        assert read_metrics[0].p99 == pytest.approx(42.0)
-        assert read_metrics[0].max == pytest.approx(75.0)
-        assert read_metrics[0].min == pytest.approx(2.0)
+        # Raw Metrics sheet absent in Phase C — metrics come back empty
+        assert len(read_metrics) == 0
+        wb = openpyxl.load_workbook(path, data_only=True)
+        # Phase C replaces Evidence with Decisions + Performance sheets
+        assert "Decisions" in wb.sheetnames
+        assert "Perf by VM" in wb.sheetnames
 
 
 # ---------------------------------------------------------------------------

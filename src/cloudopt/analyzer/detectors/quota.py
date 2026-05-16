@@ -116,7 +116,7 @@ def _cri_finding(q: QuotaItem) -> Finding:
             f"({q.current_usage}/{q.quota_limit}) — new deployments will start to fail. "
             "Request a quota increase immediately."
         ),
-        **_rec_kwargs(),
+        **_rec_kwargs(category=Category.QUOTA),
     )
 
 
@@ -141,7 +141,7 @@ def _crg_finding(q: QuotaItem, donors: list[QuotaItem]) -> Finding:
             f"{donor_summary}. Consider workload redistribution or quota-group "
             "consolidation."
         ),
-        **_rec_kwargs(),
+        **_rec_kwargs(category=Category.QUOTA),
     )
 
 
@@ -158,7 +158,7 @@ def _warning_finding(q: QuotaItem) -> Finding:
             f"({q.current_usage}/{q.quota_limit}). Plan a quota increase before "
             "consumption crosses the critical threshold."
         ),
-        **_rec_kwargs(),
+        **_rec_kwargs(category=Category.QUOTA),
     )
 
 
@@ -177,5 +177,5 @@ def _oversized_finding(q: QuotaItem, receiver_count: int) -> Finding:
             f"consumption and {receiver_count} other subscription(s) on the same "
             "SKU need more capacity — reduce it to free regional headroom."
         ),
-        **_rec_kwargs(),
+        **_rec_kwargs(category=Category.QUOTA),
     )

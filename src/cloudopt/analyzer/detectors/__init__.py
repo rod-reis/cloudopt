@@ -23,13 +23,13 @@ from typing import Optional
 
 from cloudopt.analyzer.detectors import cleanup, decom, quota, reservations, rightsize, swap
 from cloudopt.analyzer.sku_catalog import SkuCatalog
+from cloudopt.enrichment.schema import EnrichedVmMetrics
 from cloudopt.models import (
     AzureResource,
     CapacityReservationGroup,
     CollectionThresholds,
     Finding,
     QuotaItem,
-    ReservationOrder,
     VmInventory,
     VmMetrics,
 )
@@ -45,8 +45,9 @@ def run_all(
     resources: Optional[list[AzureResource]] = None,
     enable_dlc: bool = False,
     enable_env_check: bool = False,
-    rsvp_orders: Optional[list[ReservationOrder]] = None,
+    rsvp_orders: Optional[list] = None,  # unused, kept for backward compat
     crg_items: Optional[list[CapacityReservationGroup]] = None,
+    enriched_map: Optional[dict[str, EnrichedVmMetrics]] = None,
 ) -> list[Finding]:
     """Run every registered detector and return the combined Finding list.
 
@@ -59,12 +60,11 @@ def run_all(
         resources:      Optional orphaned-resource list for cleanup detectors.
         enable_dlc:     Enable DCM-DLC-001 (lower-env oversized) detector.
         enable_env_check: Enable DCM-ENV-001 (missing env-tag) detector.
-        rsvp_orders:    Optional RI/SP reservation orders (§2.6 detectors).
-        crg_items:      Optional Capacity Reservation Groups (§2.6 detectors).
+        crg_items:      Optional Capacity Reservation Groups (\u00a72.6 detectors).
     """
     out: list[Finding] = []
-    out.extend(rightsize.detect(vms, metrics, quota_items, thresholds, catalog))
-    out.extend(swap.detect(vms, metrics, quota_items, thresholds, catalog))
+    out.extend(rightsize.detect(vms, metrics, quota_items, thresholds, catalog, enriched_map=enriched_map))
+    out.extend(swap.detect(vms, metrics, quota_items, thresholds, catalog, enriched_map=enriched_map))
     out.extend(
         decom.detect(
             vms, metrics, quota_items, thresholds, catalog,
@@ -81,11 +81,7 @@ def run_all(
     out.extend(quota.detect(vms, metrics, quota_items, thresholds, catalog))
     out.extend(
         reservations.detect(
-            rsvp_orders or [],
             crg_items or [],
-            vms,
-            metrics,
-            thresholds,
         )
     )
     return out

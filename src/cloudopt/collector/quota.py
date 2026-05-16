@@ -35,6 +35,33 @@ console = Console()
 # Allocation failures older than this many days are ignored.
 _ALLOCATION_FAILURE_WINDOW_DAYS = 30
 
+# PAYG (pay-as-you-go) default vCPU quota applied to most VM families on a new
+# subscription.  Raised? = Yes when a subscription's actual limit exceeds this.
+_UNIVERSAL_PAYG_DEFAULT_VCPUS = 10
+
+# Geography meta-locations returned by the ARM locations API that do not
+# correspond to deployable Azure regions.  The Compute Usages API rejects
+# them with NoRegisteredProviderFound, so we skip them during quota collection.
+_NON_COMPUTE_LOCATIONS: frozenset[str] = frozenset({
+    "global",
+    "unitedstates",
+    "europe",
+    "asia",
+    "australia",
+    "brazil",
+    "canada",
+    "china",
+    "france",
+    "germany",
+    "india",
+    "japan",
+    "korea",
+    "norway",
+    "southafrica",
+    "switzerland",
+    "uae",
+})
+
 
 def collect_quota(
     credential: DefaultAzureCredential,
@@ -77,6 +104,14 @@ def collect_quota(
             regions_for_sub = _vm_regions.get(sub_id) or _all_vm_regions
 
         for region in sorted(regions_for_sub):
+            # The Compute Usages API does not accept geography meta-locations
+            # (e.g. 'global', 'unitedstates', 'europe') — skip them to avoid
+            # spurious NoRegisteredProviderFound errors.  These strings appear
+            # in the ARM locations list as data-residency groupings and can
+            # surface in VM inventory when Arc-enabled or cross-region resources
+            # are present.
+            if region.lower() in _NON_COMPUTE_LOCATIONS:
+                continue
             work.append((sub_id, region))
 
     if not work:
@@ -129,6 +164,7 @@ def collect_quota(
                             utilization_pct=pct,
                             alert=(pct >= quota_alert_pct),
                             allocation_failures_30d=failures,
+                            subscription_default=_UNIVERSAL_PAYG_DEFAULT_VCPUS,
                             # peak_usage_pct_30d: not available from the Compute
                             # Usages API (point-in-time only); leave as None.
                         )
@@ -303,6 +339,9 @@ def collect_quota(
             regions_for_sub = _vm_regions.get(sub_id) or _all_vm_regions
 
         for region in sorted(regions_for_sub):
+            # Skip geography meta-locations that the Compute Usages API rejects.
+            if region.lower() in _NON_COMPUTE_LOCATIONS:
+                continue
             work.append((sub_id, region))
 
     if not work:
@@ -311,6 +350,14 @@ def collect_quota(
             "Specify --regions or ensure the VM inventory is non-empty."
         )
         return []
+
+    # Re-organise the flat work list into subscription → [regions] so that
+    # we create one ComputeManagementClient per subscription.  This avoids
+    # redundant credential lookups (and the resulting SDK log noise) when
+    # the same subscription has multiple regions to query.
+    sub_regions_work: dict[str, list[str]] = {}
+    for sub_id, region in work:
+        sub_regions_work.setdefault(sub_id, []).append(region)
 
     results: list[QuotaItem] = []
 
@@ -322,43 +369,64 @@ def collect_quota(
     ) as progress:
         task = progress.add_task("Collecting quota…", total=len(work))
 
-        for sub_id, region in work:
+        for sub_id, regions in sub_regions_work.items():
             sub_name = sub_map.get(sub_id, sub_id)
-            try:
-                compute_client = ComputeManagementClient(credential, sub_id)
-                for usage in compute_client.usage.list(location=region):
-                    limit: int = int(usage.limit or 0)
-                    current: int = int(usage.current_value or 0)
-                    if limit == 0:
-                        continue
-                    resource_type: str = (usage.name.value or "")
-                    display_name: str = (usage.name.localized_value or resource_type)
-                    # Only collect vCPU-style quota entries.  Other compute
-                    # quotas (availability sets, regional VM count, etc.) are
-                    # not actionable for capacity rebalancing.
-                    if "vcpu" not in display_name.lower():
-                        continue
-                    pct = round(current / limit * 100, 1)
-                    results.append(
-                        QuotaItem(
-                            subscription_id=sub_id,
-                            subscription_name=sub_name,
-                            region=region,
-                            resource_type=resource_type,
-                            display_name=display_name,
-                            current_usage=current,
-                            quota_limit=limit,
-                            utilization_pct=pct,
-                            alert=(pct >= quota_alert_pct),
+            compute_client = ComputeManagementClient(credential, sub_id)
+            # Set when a credential / auth error is detected on the first
+            # region — all remaining regions of this subscription will have
+            # the same problem, so we skip them to avoid duplicate log noise.
+            sub_auth_failed = False
+
+            for region in regions:
+                if sub_auth_failed:
+                    progress.advance(task)
+                    continue
+                try:
+                    for usage in compute_client.usage.list(location=region):
+                        limit: int = int(usage.limit or 0)
+                        current: int = int(usage.current_value or 0)
+                        if limit == 0:
+                            continue
+                        resource_type: str = (usage.name.value or "")
+                        display_name: str = (usage.name.localized_value or resource_type)
+                        # Only collect vCPU-style quota entries.  Other compute
+                        # quotas (availability sets, regional VM count, etc.) are
+                        # not actionable for capacity rebalancing.
+                        if "vcpu" not in display_name.lower():
+                            continue
+                        pct = round(current / limit * 100, 1)
+                        results.append(
+                            QuotaItem(
+                                subscription_id=sub_id,
+                                subscription_name=sub_name,
+                                region=region,
+                                resource_type=resource_type,
+                                display_name=display_name,
+                                current_usage=current,
+                                quota_limit=limit,
+                                utilization_pct=pct,
+                                alert=(pct >= quota_alert_pct),
+                                subscription_default=_UNIVERSAL_PAYG_DEFAULT_VCPUS,
+                            )
                         )
-                    )
-            except Exception as exc:
-                console.print(
-                    f"[yellow]Warning:[/yellow] quota unavailable for "
-                    f"{sub_name} / {region}: {exc}"
-                )
-            finally:
-                progress.advance(task)
+                except Exception as exc:
+                    exc_str = str(exc).lower()
+                    # Auth/credential errors affect the entire subscription,
+                    # not just this region — emit one consolidated warning and
+                    # skip remaining regions to suppress repeated SDK log lines.
+                    if any(kw in exc_str for kw in ("credential", "azure cli", "authentication", "token")):
+                        console.print(
+                            f"[yellow]Warning:[/yellow] quota unavailable for "
+                            f"{sub_name} (all regions): {exc}"
+                        )
+                        sub_auth_failed = True
+                    else:
+                        console.print(
+                            f"[yellow]Warning:[/yellow] quota unavailable for "
+                            f"{sub_name} / {region}: {exc}"
+                        )
+                finally:
+                    progress.advance(task)
 
     return results
 

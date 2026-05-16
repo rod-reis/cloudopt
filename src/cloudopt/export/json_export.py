@@ -13,8 +13,8 @@ from cloudopt.models import (
     AzureResource,
     CapacityReservationGroup,
     CollectionMetadata,
+    ManagedComputeGroupRow,
     QuotaItem,
-    ReservationOrder,
     SubscriptionZoneMapping,
     VmInventory,
     VmMetrics,
@@ -41,8 +41,8 @@ def write_json(
     enriched_metrics: list[EnrichedVmMetrics] | None = None,
     enrichment_summary: EnrichmentSummary | None = None,
     resources: list[AzureResource] | None = None,
-    reservations: list[ReservationOrder] | None = None,
     capacity_reservations: list[CapacityReservationGroup] | None = None,
+    vmss_groups: list[ManagedComputeGroupRow] | None = None,
 ) -> None:
     """Write all collection data to a JSON file at *path*."""
     payload: dict = {
@@ -57,8 +57,8 @@ def write_json(
         "appinsights_metrics": [_ai_metrics_dict(m) for m in (appinsights_metrics or [])],
         "zone_mappings": [_zone_mapping_dict(z) for z in (zone_mappings or [])],
         "resources": [_resource_dict(r) for r in (resources or [])],
-        "reservations": [_reservation_dict(r) for r in (reservations or [])],
         "capacity_reservations": [_crg_dict(c) for c in (capacity_reservations or [])],
+        "vmss_groups": [g.model_dump() for g in (vmss_groups or [])],
     }
     if enriched_metrics is not None:
         payload["enrichment"] = {
@@ -82,6 +82,7 @@ def _vm_dict(vm: VmInventory) -> dict:
         "os_type": vm.os_type,
         "os_version": vm.os_version,
         "power_state": vm.power_state,
+        "days_stopped": vm.days_stopped,
         "image_publisher": vm.image_publisher,
         "image_offer": vm.image_offer,
         "image_sku": vm.image_sku,
@@ -90,8 +91,14 @@ def _vm_dict(vm: VmInventory) -> dict:
         "nic_count": vm.nic_count,
         "disk_count": vm.disk_count,
         "disk_sizes_gb": vm.disk_sizes_gb,
+        "vmss_id": vm.vmss_id,
         "vmss_name": vm.vmss_name,
+        "availability_set_id": vm.availability_set_id,
         "availability_set_name": vm.availability_set_name,
+        "parent_service_type": vm.parent_service_type.value,
+        "parent_service_id": vm.parent_service_id,
+        "parent_service_name": vm.parent_service_name,
+        "parent_pool_name": vm.parent_pool_name,
         "workload": vm.workload,
         "application": vm.application,
         "environment": vm.environment,
@@ -266,22 +273,6 @@ def _enriched_vm_dict(e: EnrichedVmMetrics) -> dict:
             }
             for dp in e.data_points
         ],
-    }
-
-
-def _reservation_dict(r: ReservationOrder) -> dict:
-    """Serialise a ReservationOrder — counts, percentages, dates; no $ fields."""
-    return {
-        "order_id": mask_subscription_ids_in_string(r.order_id),
-        "display_name": r.display_name,
-        "term": r.term,
-        "expiry_date": r.expiry_date,
-        "sku_name": r.sku_name,
-        "region": r.region,
-        "reserved_count": r.reserved_count,
-        "applied_scope_type": r.applied_scope_type,
-        "applied_scope_ids": r.masked_applied_scope_ids(),
-        "utilization_pct": r.utilization_pct,
     }
 
 

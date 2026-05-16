@@ -60,8 +60,8 @@ _CHECKPOINT_INTERVAL = 500
 _METRICS: list[tuple[str, str, str]] = [
     ("Percentage CPU",            "cpu_pct",             "Average,Minimum,Maximum"),
     ("Available Memory Bytes",    "available_memory_bytes", "Average,Minimum,Maximum"),
-    ("Disk Read Bytes/sec",       "disk_read_bps",       "Average"),
-    ("Disk Write Bytes/sec",      "disk_write_bps",      "Average"),
+    ("Disk Read Bytes",            "disk_read_bps",       "Average"),
+    ("Disk Write Bytes",           "disk_write_bps",      "Average"),
     ("Disk Read Operations/Sec",  "disk_read_iops",      "Average"),
     ("Disk Write Operations/Sec", "disk_write_iops",     "Average"),
     ("Network In Total",          "network_in_bytes",    "Total,Average,Minimum,Maximum"),

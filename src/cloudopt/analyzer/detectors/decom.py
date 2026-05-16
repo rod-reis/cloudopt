@@ -79,6 +79,15 @@ def _evaluate(
         count = len(stopped)
         total = len(group.members)
         state_label = _state_label(stopped[0].power_state or "")
+        days_stopped = stopped[0].days_stopped
+        if days_stopped is not None:
+            days_part = (
+                f" (stopped for {days_stopped} days)"
+                if days_stopped <= 90
+                else " (stopped for over 90 days; Activity Log lookback exceeded)"
+            )
+        else:
+            days_part = ""
         out.append(
             Finding(
                 vm_id=vm_id,
@@ -89,11 +98,11 @@ def _evaluate(
                 proposed=None,
                 rationale=(
                     f"{count} of {total} VM(s) in this workload "
-                    f"are in a {state_label} state. Review whether these can be "
+                    f"are in a {state_label} state{days_part}. Review whether these can be "
                     "permanently decommissioned to free compute quota and reduce "
                     "management overhead."
                 ),
-                **_rec_kwargs(),
+                **_rec_kwargs(category=Category.DECOM),
             )
         )
 
@@ -140,7 +149,7 @@ def _check_dlc(group, vm_id: str, sku: str):
                     f"but has {vm.vcpus} vCPUs — production-sized. "
                     "Consider downsizing or scheduling during business hours only."
                 ),
-                **_rec_kwargs(),
+                **_rec_kwargs(category=Category.DECOM),
             )
     return None
 
@@ -161,6 +170,6 @@ def _check_env(group, vm_id: str, sku: str):
                     "distinguish production from non-production workloads and apply "
                     "appropriate cost controls."
                 ),
-                **_rec_kwargs(),
+                **_rec_kwargs(category=Category.DECOM),
             )
     return None

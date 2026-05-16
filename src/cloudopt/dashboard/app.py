@@ -33,9 +33,10 @@ _DATA: dict[str, Any] = {
     "quota": [],
     "metadata": None,
     "path": None,
-    "reservations": [],
     "capacity_reservations": [],
     "deployment_failures": [],
+    "findings": [],
+    "source_coverage": [],
 }
 
 
@@ -138,24 +139,6 @@ def create_app(data_path: Path) -> FastAPI:
             for q in items
         ]
 
-    @app.get("/api/reservations")
-    async def reservations_view():
-        from cloudopt.models import mask_subscription_id
-        result = []
-        for r in _DATA["reservations"]:
-            result.append({
-                "order_id": r.masked_applied_scope_ids()[0] if r.applied_scope_ids else r.order_id,
-                "display_name": r.display_name,
-                "sku_name": r.sku_name,
-                "region": r.region,
-                "term": r.term,
-                "expiry_date": r.expiry_date,
-                "reserved_count": r.reserved_count,
-                "applied_scope_type": r.applied_scope_type,
-                "utilization_pct": r.utilization_pct,
-            })
-        return result
-
     @app.get("/api/capacity-reservations")
     async def capacity_reservations_view():
         result = []
@@ -204,6 +187,25 @@ def create_app(data_path: Path) -> FastAPI:
             }
             for f in items
         ]
+
+    @app.get("/api/findings")
+    async def findings_view(
+        type: str | None = Query(None),
+        category: str | None = Query(None),
+        readiness: str | None = Query(None),
+    ):
+        items = _DATA["findings"]
+        if type:
+            items = [f for f in items if f.finding_type.value.lower() == type.lower()]
+        if category:
+            items = [f for f in items if f.category.value.lower() == category.lower()]
+        if readiness:
+            items = [f for f in items if f.readiness.value.lower() == readiness.lower()]
+        return [f.model_dump() for f in items]
+
+    @app.get("/api/source-coverage")
+    async def source_coverage_view():
+        return _DATA["source_coverage"]
 
     return app
 
@@ -269,21 +271,14 @@ def _load_json(path: Path) -> None:
 
     _store(vms, metrics, recommendations, metadata, [])
 
-    # --- Reservations ---
-    from cloudopt.models import ReservationOrder, CapacityReservationGroup
-    rsvp: list[ReservationOrder] = []
-    for d in raw.get("reservations", []):
-        try:
-            rsvp.append(ReservationOrder(**d))
-        except Exception:
-            pass
+    # --- Capacity Reservation Groups ---
+    from cloudopt.models import CapacityReservationGroup
     crg: list[CapacityReservationGroup] = []
     for d in raw.get("capacity_reservations", []):
         try:
             crg.append(CapacityReservationGroup(**d))
         except Exception:
             pass
-    _DATA["reservations"] = rsvp
     _DATA["capacity_reservations"] = crg
 
     # --- Deployment Failures ---
@@ -295,6 +290,35 @@ def _load_json(path: Path) -> None:
         except Exception:
             pass
     _DATA["deployment_failures"] = depfail
+
+    # --- Detector pipeline → Finding list --------------------------------
+    from cloudopt.analyzer.detectors import run_all
+    from cloudopt.analyzer.sku_catalog import OfflineSkuCatalog
+    from cloudopt.enrichment.joiner import join_monitoring_data
+
+    meta = _DATA.get("metadata")
+    thresholds = meta.thresholds if meta else None
+    try:
+        from cloudopt.models import CollectionThresholds
+        if thresholds is None:
+            thresholds = CollectionThresholds()
+        findings = run_all(
+            vms=vms,
+            metrics=metrics,
+            quota_items=_DATA.get("quota", []),
+            thresholds=thresholds,
+            catalog=OfflineSkuCatalog(),
+            resources=None,
+            rsvp_orders=_DATA.get("reservations", []),
+            crg_items=_DATA.get("capacity_reservations", []),
+            enriched_map=None,
+        )
+    except Exception:
+        findings = []
+    _DATA["findings"] = findings
+
+    # --- Source coverage (from enriched metrics if available) ------------
+    _DATA["source_coverage"] = []
 
 
 def _store(vms, metrics, recommendations, metadata, quota=None) -> None:

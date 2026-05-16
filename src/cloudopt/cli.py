@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import logging
+import time
 from pathlib import Path
 from typing import Annotated, Optional
 
@@ -20,6 +22,17 @@ app = typer.Typer(
     rich_markup_mode="rich",
 )
 console = Console()
+
+
+# ---------------------------------------------------------------------------
+# Debug / timing helpers
+# ---------------------------------------------------------------------------
+
+def _debug_time(debug: bool, label: str, t0: float) -> None:
+    """Print elapsed seconds for a step when ``--debug`` is active."""
+    if debug:
+        elapsed = time.perf_counter() - t0
+        console.print(f"  [dim]\u23f1  {label}: {elapsed:.1f}s[/dim]")
 
 
 # ---------------------------------------------------------------------------
@@ -309,6 +322,16 @@ def collect(
             max=100.0,
         ),
     ] = 20.0,
+    debug: Annotated[
+        bool,
+        typer.Option(
+            "--debug",
+            help=(
+                "Enable debug mode: print wall-clock timing for every collection "
+                "step, total elapsed time, and set cloudopt log level to DEBUG."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Collect VM and Application Insights capacity data from Azure.
 
@@ -339,6 +362,13 @@ def collect(
         build_scope,
         scope_from_config_file,
     )
+
+    _collect_start = time.perf_counter()
+
+    if debug:
+        logging.basicConfig(level=logging.DEBUG, format="%(levelname)s %(name)s: %(message)s")
+        logging.getLogger("cloudopt").setLevel(logging.DEBUG)
+        console.print("[dim]\U0001f41e Debug mode ON — per-step timing and verbose logging enabled.[/dim]\n")
 
     console.rule("[bold cyan]CLOUDOPT[/bold cyan]")
     console.print(f"[dim]Version {__version__}[/dim]\n")
@@ -426,6 +456,7 @@ def collect(
 
     # ── 1. Auth ──────────────────────────────────────────────────────────
     console.print("[bold]Step 1:[/bold] Authenticating to Azure…")
+    _t = time.perf_counter()
     credential = build_credential(tenant_id=scope.tenant_id)
 
     target_subs = list_subscriptions(
@@ -436,11 +467,14 @@ def collect(
     console.print(
         f"[green]✓[/green] {len(target_subs)} subscription(s) targeted.\n"
     )
+    _debug_time(debug, "Step 1: Auth", _t)
 
     # ── 2. Pre-execution summary ─────────────────────────────────────────
     console.print("[bold]Step 2:[/bold] Counting resources across subscriptions…")
+    _t = time.perf_counter()
     resource_counts = count_resources_by_type(credential, target_subs, scope=scope)
     console.print("[green]✓[/green] Resource counts ready.\n")
+    _debug_time(debug, "Step 2: Resource count", _t)
 
     _print_pre_execution_summary(
         target_subs=target_subs,
@@ -468,9 +502,11 @@ def collect(
 
     # ── 3. VM Inventory ──────────────────────────────────────────────────
     console.print("[bold]Step 3:[/bold] Collecting VM inventory via Resource Graph…")
+    _t = time.perf_counter()
     sku_catalog = SkuCatalog(credential)
     vms = collect_inventory(credential, target_subs, sku_catalog, scope=scope)
     console.print(f"[green]✓[/green] {len(vms)} VM(s) discovered.\n")
+    _debug_time(debug, "Step 3: VM inventory", _t)
 
     if dry_run:
         console.print("[yellow]--dry-run: skipping metrics, recommendations, and export.[/yellow]")
@@ -491,6 +527,7 @@ def collect(
         "[dim]  Processing subscriptions sequentially; "
         f"batches of {eff_concurrency} VMs per subscription.[/dim]"
     )
+    _t = time.perf_counter()
     all_metrics = asyncio.run(
         collect_metrics(
             credential=credential,
@@ -504,11 +541,14 @@ def collect(
     console.print(
         f"[green]✓[/green] Metrics collected for {len(all_metrics)} metric series.\n"
     )
+    _debug_time(debug, "Step 5: VM metrics", _t)
 
     # ── 6. App Insights ──────────────────────────────────────────────────
     console.print("[bold]Step 6:[/bold] Collecting Application Insights inventory…")
+    _t = time.perf_counter()
     ai_components = collect_appinsights_inventory(credential, target_subs, scope=scope)
     console.print(f"[green]✓[/green] {len(ai_components)} App Insights component(s) discovered.\n")
+    _debug_time(debug, "Step 6: App Insights inventory", _t)
 
     ai_metrics: list = []
     if ai_components:
@@ -520,6 +560,7 @@ def collect(
             "[dim]  Processing subscriptions sequentially; "
             f"batches of {eff_concurrency} components per subscription.[/dim]"
         )
+        _t = time.perf_counter()
         ai_metrics = asyncio.run(
             collect_appinsights_metrics(
                 credential=credential,
@@ -534,6 +575,7 @@ def collect(
             f"[green]✓[/green] {len(ai_metrics)} App Insights metric series collected "
             f"({jvm_count} JVM).\n"
         )
+        _debug_time(debug, "Step 6b: App Insights metrics", _t)
     else:
         console.print("[dim]  No App Insights components found — skipping.[/dim]\n")
 
@@ -550,6 +592,7 @@ def collect(
         else target_subs
     )
 
+    _t = time.perf_counter()
     quota_items = collect_quota(
         credential=credential,
         subscriptions=quota_target_subs,
@@ -562,9 +605,11 @@ def collect(
         f"[green]✓[/green] {len(quota_items)} quota entries collected "
         f"({quota_alerts} alert(s) above {thresholds.quota_alert_pct:.0f}%).\n"
     )
+    _debug_time(debug, "Step 7: Quota", _t)
 
     # ── 7b. Advisor SKU-change recommendations ───────────────────────────
     console.print("[bold]Step 7b:[/bold] Collecting Azure Advisor SKU-change recommendations…")
+    _t = time.perf_counter()
     advisor_recs = collect_advisor_sku_recommendations(
         credential=credential,
         subscriptions=target_subs,
@@ -573,20 +618,125 @@ def collect(
     console.print(
         f"[green]✓[/green] {len(advisor_recs)} Advisor SKU-change recommendation(s) collected.\n"
     )
+    _debug_time(debug, "Step 7b: Advisor", _t)
 
     # ── 7c. Subscription availability-zone mappings ──────────────────────
     console.print("[bold]Step 7c:[/bold] Collecting subscription availability-zone mappings…")
+    _t = time.perf_counter()
     zone_maps = collect_zone_mappings(credential=credential, subscriptions=target_subs)
     console.print(
         f"[green]✓[/green] {len(zone_maps)} zone mapping row(s) collected.\n"
     )
+    _debug_time(debug, "Step 7c: Zone mappings", _t)
 
     # ── 7d. Full resource inventory via Resource Graph ───────────────────
     console.print("[bold]Step 7d:[/bold] Collecting full resource inventory via Resource Graph…")
+    _t = time.perf_counter()
     all_resources = collect_resources(credential=credential, subscriptions=target_subs, scope=scope)
     console.print(
         f"[green]✓[/green] {len(all_resources)} resource(s) discovered.\n"
     )
+    _debug_time(debug, "Step 7d: Resource inventory", _t)
+
+    # ── 7e. Stop history for deallocated / stopped VMs ───────────────────
+    from cloudopt.collector.stop_history import collect_stop_history
+
+    console.print("[bold]Step 7e:[/bold] Collecting VM stop history from Activity Log…")
+    _stopped_vms = [
+        v for v in vms
+        if (v.power_state or "").lower() in (
+            "powerstate/deallocated",
+            "powerstate/stopped",
+        )
+    ]
+    _t = time.perf_counter()
+    if _stopped_vms:
+        if debug:
+            console.print(
+                f"  [dim]  {len(_stopped_vms)} stopped/deallocated VM(s) to query.[/dim]"
+            )
+        _stop_map = collect_stop_history(credential, target_subs, _stopped_vms)
+        vms = [
+            v.model_copy(update={"days_stopped": _stop_map.get(v.resource_id.lower())})
+            for v in vms
+        ]
+        console.print(
+            f"[green]✓[/green] {len(_stop_map)} stopped VM(s) have stop-duration data.\n"
+        )
+    else:
+        console.print("[dim]No stopped/deallocated VMs — skipping Activity Log query.[/dim]\n")
+    _debug_time(debug, "Step 7e: Stop history", _t)
+
+    # ── 7f. VMSS Uniform groups ───────────────────────────────────────────
+    from cloudopt.analyzer.sku_catalog import SkuCatalog as _SkuCatalog
+    from cloudopt.collector.vmss_groups import collect_vmss_groups
+
+    console.print("[bold]Step 7f:[/bold] Collecting VMSS Uniform inventory and CPU metrics…")
+    _t = time.perf_counter()
+    _vmss_sku_catalog = _SkuCatalog(credential)
+    vmss_uniform_groups = collect_vmss_groups(
+        credential=credential,
+        subscriptions=target_subs,
+        scope=scope,
+        days=eff_metric_days,
+        sku_catalog=_vmss_sku_catalog,
+    )
+    console.print(
+        f"[green]✓[/green] {len(vmss_uniform_groups)} VMSS Uniform group(s) collected.\n"
+    )
+    _debug_time(debug, "Step 7f: VMSS groups", _t)
+
+    # ── 7g. Parentage resolution ──────────────────────────────────────────
+    from cloudopt.collector.parentage import resolve_parent_services
+    from cloudopt.models import ParentServiceType
+
+    def _extract_arm_type(resource_id: str) -> str | None:
+        """Derive ARM resource type from a resource ID (e.g. .../providers/ns/type/name)."""
+        parts = resource_id.lower().split("/")
+        try:
+            idx = parts.index("providers")
+            if idx + 2 < len(parts):
+                return f"{parts[idx + 1]}/{parts[idx + 2]}"
+        except (ValueError, IndexError):
+            pass
+        return None
+
+    console.print("[bold]Step 7g:[/bold] Resolving VMSS parent service associations…")
+    _t = time.perf_counter()
+    if vmss_uniform_groups:
+        _vmss_ids = [g.vmss_id for g in vmss_uniform_groups if g.vmss_id]
+        _parentage = resolve_parent_services(
+            credential=credential,
+            subscriptions=target_subs,
+            vmss_ids=_vmss_ids,
+        )
+        _updated: list = []
+        for _g in vmss_uniform_groups:
+            _key = (_g.vmss_id or "").lower()
+            _entry = _parentage.get(_g.vmss_id) or _parentage.get(_key)
+            if _entry:
+                _svc_type, _svc_id, _svc_name, _pool_name = _entry
+                _parent_rt = _extract_arm_type(_svc_id) if _svc_id else None
+                _g = _g.model_copy(update={
+                    "parent_service_type":  _svc_type,
+                    "parent_service_id":    _svc_id,
+                    "parent_service_name":  _svc_name,
+                    "parent_pool_name":     _pool_name,
+                    "parent_resource_type": _parent_rt,
+                })
+            _updated.append(_g)
+        vmss_uniform_groups = _updated
+        _managed_count = sum(
+            1 for _g in vmss_uniform_groups
+            if _g.parent_service_type != ParentServiceType.STANDALONE_VMSS
+        )
+        console.print(
+            f"[green]✓[/green] {_managed_count} group(s) classified under managed services"
+            f" ({len(vmss_uniform_groups) - _managed_count} standalone).\n"
+        )
+    else:
+        console.print("[dim]No VMSS groups to classify.[/dim]\n")
+    _debug_time(debug, "Step 7g: Parentage resolution", _t)
 
     # ── 8. Export ────────────────────────────────────────────────────────
     from cloudopt.models import (
@@ -612,6 +762,7 @@ def collect(
     _ts = datetime.datetime.now().strftime("%Y-%m-%d_%H_%M")
     json_path = eff_output_dir / f"cloudopt_export_{_ts}.json"
 
+    _t = time.perf_counter()
     write_json(
         vms, all_metrics, recommendations, metadata, json_path,
         quota=quota_items,
@@ -621,7 +772,9 @@ def collect(
         workload_info=workload_info,
         zone_mappings=zone_maps,
         resources=all_resources,
+        vmss_groups=vmss_uniform_groups,
     )
+    _debug_time(debug, "Step 8: JSON export", _t)
 
     # Delete the checkpoint file now that data is safely written to JSON.
     # If it persists, the next collect run skips all VMs (they're already in
@@ -632,6 +785,9 @@ def collect(
 
     console.rule("[bold green]Collection complete[/bold green]")
     console.print(f"  JSON  : [cyan]{json_path}[/cyan]")
+    if debug:
+        total = time.perf_counter() - _collect_start
+        console.print(f"  [dim]⏱  Total elapsed: {total:.1f}s ({total / 60:.1f} min)[/dim]")
     console.print(
         "\nGenerate the Excel workbook with: [bold]CLOUDOPT analyze "
         f"--from {json_path}[/bold]\n"
@@ -698,6 +854,7 @@ def analyze(
         CLOUDOPT analyze --from cloudopt_export_<timestamp>.json
     """
     import json
+    from cloudopt.analyzer.detectors import run_all
     from cloudopt.analyzer.recommendations import generate_recommendations
     from cloudopt.analyzer.sku_catalog import OfflineSkuCatalog
     from cloudopt.enrichment.loader import load_monitoring_csv
@@ -707,9 +864,11 @@ def analyze(
         AdvisorRecommendation,
         AppInsightsInventory,
         AppInsightsMetrics,
+        CapacityReservationGroup,
         CollectionMetadata,
         CollectionThresholds,
         DailyDataPoint,
+        DeploymentFailureEntry,
         QuotaItem,
         SubscriptionZoneMapping,
         VmInventory,
@@ -815,6 +974,31 @@ def analyze(
         except Exception:
             pass
 
+    # --- Capacity Reservation Groups --------------------------------------
+    crg_from_json: list[CapacityReservationGroup] = []
+    for d in raw.get("capacity_reservations", []):
+        try:
+            crg_from_json.append(CapacityReservationGroup(**d))
+        except Exception:
+            pass
+
+    # --- VMSS Uniform groups (pre-collected with CPU metrics) ------------
+    from cloudopt.models import ManagedComputeGroupRow as _ManagedComputeGroupRow
+    vmss_uniform_groups: list[_ManagedComputeGroupRow] = []
+    for d in raw.get("vmss_groups", []):
+        try:
+            vmss_uniform_groups.append(_ManagedComputeGroupRow(**d))
+        except Exception:
+            pass
+
+    # --- Deployment Failures ----------------------------------------------
+    dep_failures_from_json: list[DeploymentFailureEntry] = []
+    for d in raw.get("deployment_failures", []):
+        try:
+            dep_failures_from_json.append(DeploymentFailureEntry(**d))
+        except Exception:
+            pass
+
     # --- Metadata ----------------------------------------------------------
     meta_raw = raw.get("metadata", {})
     try:
@@ -860,7 +1044,7 @@ def analyze(
         except Exception as exc:
             console.print(f"[yellow]Warning:[/yellow] Could not load monitoring CSV: {exc}")
 
-    # --- Generate recommendations -----------------------------------------
+    # --- Generate legacy recommendations (backward compat) ---------------
     thresholds = metadata.thresholds
     recommendations = generate_recommendations(
         vms=vms,
@@ -869,6 +1053,35 @@ def analyze(
         sku_catalog=OfflineSkuCatalog(),
         enriched_metrics=enriched_metrics or [],
     )
+
+    # --- Run detector pipeline → Finding list (Phase B) ------------------
+    enriched_map = {e.vm_name: e for e in (enriched_metrics or [])}
+    catalog = OfflineSkuCatalog()
+    try:
+        findings = run_all(
+            vms=vms,
+            metrics=metrics,
+            quota_items=quota,
+            thresholds=thresholds,
+            catalog=catalog,
+            resources=resources_from_json,
+            crg_items=crg_from_json,
+            enriched_map=enriched_map or None,
+        )
+        console.print(f"  [green]✓[/green] {len(findings)} finding(s) generated by detector pipeline.")
+    except Exception as exc:
+        console.print(f"[yellow]Warning:[/yellow] Detector pipeline error: {exc}")
+        findings = []
+
+    # --- Build managed compute groups (AKS, AVD, Flex VMSS, etc.) --------
+    from cloudopt.analyzer.grouping import group_managed_vms_by_sku as _group_managed
+    from cloudopt.analyzer.detectors._shared import _group_metrics
+
+    _metrics_by_vm = _group_metrics(metrics)
+    managed_groups: list[_ManagedComputeGroupRow] = list(
+        _group_managed(vms, _metrics_by_vm)
+    )
+    managed_groups.extend(vmss_uniform_groups)
 
     # --- Write workbook ----------------------------------------------------
     out_dir = output_dir or from_file.parent
@@ -880,7 +1093,8 @@ def analyze(
 
     console.print(f"Writing Excel workbook to [cyan]{xlsx_path}[/cyan]…")
     write_workbook(
-        vms, metrics, recommendations, metadata, xlsx_path,
+        vms, metrics, findings, metadata, xlsx_path,
+        recommendations=recommendations,
         quota=quota,
         appinsights=appinsights,
         appinsights_metrics=appinsights_metrics,
@@ -889,6 +1103,9 @@ def analyze(
         zone_mappings=zone_mappings,
         enriched_metrics=enriched_metrics,
         resources=resources_from_json,
+        capacity_reservations=crg_from_json,
+        deployment_failures=dep_failures_from_json,
+        managed_groups=managed_groups,
     )
 
     console.rule("[bold green]Analysis complete[/bold green]")
