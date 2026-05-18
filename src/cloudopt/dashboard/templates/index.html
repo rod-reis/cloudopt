@@ -391,7 +391,8 @@
                   <th>VM SKU</th>
                   <th onclick="sortTable('groups-table', 5)">VM Count ↕</th>
                   <th onclick="sortTable('groups-table', 6)">Avg CPU % ↕</th>
-                  <th onclick="sortTable('groups-table', 7)">Avg Mem % ↕</th>
+                  <th onclick="sortTable('groups-table', 7)">P95 CPU % ↕</th>
+                  <th onclick="sortTable('groups-table', 8)">Avg Mem % ↕</th>
                 </tr>
               </thead>
               <tbody id="groups-body"></tbody>
@@ -766,6 +767,7 @@
       <td>${g.vm_sku}</td>
       <td>${g.vm_count}</td>
       <td>${utilPill(g.avg_cpu_pct)}</td>
+      <td>${utilPill(g.p95_cpu_pct)}</td>
       <td>${utilPill(g.avg_mem_pct)}</td>
     </tr>`,
           )
