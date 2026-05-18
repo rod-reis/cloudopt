@@ -1,4 +1,4 @@
-"""Collect VMSS Uniform resources + CPU metrics and return ManagedComputeGroupRow list.
+"""Collect VMSS Uniform resources + CPU/memory metrics and return ManagedComputeGroupRow list.
 
 VMSS Uniform VMs appear as resources of type
 ``microsoft.compute/virtualmachinescalesets``.  Unlike Flex VMSS (whose member
@@ -7,12 +7,10 @@ by Azure Monitor and do not appear in the regular VM inventory query.
 
 This module:
 1. Queries ARG for all Uniform VMSS in scope.
-2. Fetches ``Percentage CPU`` metrics per VMSS from Azure Monitor (sync).
-3. Returns one ``ManagedComputeGroupRow`` per VMSS with CPU aggregates.
-
-Memory metrics (``Available Memory Bytes``) are a *guest* counter and are not
-emitted at the VMSS platform level for Uniform scale-sets; ``avg_mem_pct`` is
-therefore left ``None``.
+2. Fetches ``Percentage CPU`` and ``Available Memory Bytes`` metrics per VMSS
+   from Azure Monitor in a single call (sync).
+3. Returns one ``ManagedComputeGroupRow`` per VMSS with CPU aggregates and
+   memory utilisation percentage derived from available bytes + SKU total RAM.
 """
 from __future__ import annotations
 
@@ -43,7 +41,8 @@ _MAX_SUBS_PER_QUERY = 200
 
 # Azure Monitor metrics to collect at the VMSS level
 _CPU_METRIC = "Percentage CPU"
-_CPU_AGGREGATION = "Average,Minimum,Maximum"
+_MEM_METRIC = "Available Memory Bytes"
+_AGGREGATION = "Average,Minimum,Maximum"
 
 # ARG query for Uniform VMSS
 _VMSS_QUERY_BASE = "Resources\n| where type =~ 'microsoft.compute/virtualmachinescalesets'\n| where properties.orchestrationMode =~ 'Uniform'"
@@ -78,14 +77,16 @@ def collect_vmss_groups(
 ) -> list[ManagedComputeGroupRow]:
     """Return one ``ManagedComputeGroupRow`` per Uniform VMSS in scope.
 
-    CPU metrics are fetched from Azure Monitor for the VMSS resource.
-    Memory metrics are unavailable at the VMSS Uniform platform level and are
-    left as ``None``.
+    CPU metrics and Available Memory Bytes are fetched from Azure Monitor for
+    each VMSS resource in a single metrics API call.  Memory utilisation is
+    derived as ``(1 - avg_available_bytes / total_bytes) * 100`` using the
+    per-node total RAM from the SKU catalog; it is left ``None`` when the SKU
+    catalog is absent or the metric is unavailable.
 
     Args:
         sku_catalog: Optional :class:`~cloudopt.analyzer.sku_catalog.SkuCatalog`
             used to populate *vcpus* and *memory_gb* from the live Azure SKU API.
-            When *None*, vcpus and memory_gb default to 0.
+            When *None*, vcpus and memory_gb default to 0 and avg_mem_pct is None.
     """
     if not subscriptions:
         return []
@@ -171,52 +172,63 @@ def collect_vmss_groups(
 
         for row in vmss_list:
             vmss_id: str = str(row.get("id", ""))
-            cpu_metrics = _fetch_cpu_metrics(monitor, vmss_id, timespan)
+            cpu_metrics = _fetch_platform_metrics(monitor, vmss_id, timespan)
             results.append(_build_row(row, sub_name, cpu_metrics, sku_catalog))
 
     return results
 
 
-def _fetch_cpu_metrics(
+def _fetch_platform_metrics(
     monitor: MonitorManagementClient,
     vmss_id: str,
     timespan: str,
 ) -> dict[str, float] | None:
-    """Fetch Percentage CPU metrics for a VMSS and return aggregated stats.
+    """Fetch Percentage CPU and Available Memory Bytes for a VMSS.
 
-    Returns a dict with keys: avg, p95, p99, max, min — or None on failure.
+    Both metrics are requested in a single Azure Monitor call.
+    Returns a dict with keys: avg, p95, p99, max, min (CPU %) plus
+    avg_available_mem_bytes — or None on failure.
     """
     try:
         response = monitor.metrics.list(
             resource_uri=vmss_id,
             timespan=timespan,
             interval="P1D",
-            metricnames=_CPU_METRIC,
-            aggregation=_CPU_AGGREGATION,
+            metricnames=f"{_CPU_METRIC},{_MEM_METRIC}",
+            aggregation=_AGGREGATION,
         )
     except Exception as exc:
-        _LOG.debug("VMSS CPU metrics failed for %s: %s", vmss_id, exc)
+        _LOG.debug("VMSS platform metrics failed for %s: %s", vmss_id, exc)
         return None
 
     if not response or not response.value:
         return None
 
-    metric = response.value[0]
-    if not metric.timeseries:
-        return None
+    cpu_metric = next(
+        (m for m in response.value if m.name and m.name.value and
+         m.name.value.lower() == _CPU_METRIC.lower()),
+        None,
+    )
+    mem_metric = next(
+        (m for m in response.value if m.name and m.name.value and
+         m.name.value.lower() == _MEM_METRIC.lower()),
+        None,
+    )
 
+    # ── CPU aggregates ──────────────────────────────────────────────────────
     avg_vals: list[float] = []
     max_vals: list[float] = []
     min_vals: list[float] = []
 
-    for ts in metric.timeseries:
-        for point in ts.data or []:
-            if point.average is not None:
-                avg_vals.append(point.average)
-            if point.maximum is not None:
-                max_vals.append(point.maximum)
-            if point.minimum is not None:
-                min_vals.append(point.minimum)
+    if cpu_metric and cpu_metric.timeseries:
+        for ts in cpu_metric.timeseries:
+            for point in ts.data or []:
+                if point.average is not None:
+                    avg_vals.append(point.average)
+                if point.maximum is not None:
+                    max_vals.append(point.maximum)
+                if point.minimum is not None:
+                    min_vals.append(point.minimum)
 
     if not avg_vals:
         return None
@@ -230,13 +242,44 @@ def _fetch_cpu_metrics(
         lo, hi = int(idx), min(int(idx) + 1, len(data) - 1)
         return data[lo] + (data[hi] - data[lo]) * (idx - lo)
 
-    return {
+    result: dict[str, float] = {
         "avg": round(statistics.mean(avg_vals), 2),
         "p95": round(_pct(sorted_avgs, 95), 2),
         "p99": round(_pct(sorted_avgs, 99), 2),
         "max": round(max(max_vals) if max_vals else max(avg_vals), 2),
         "min": round(min(min_vals) if min_vals else min(avg_vals), 2),
     }
+
+    # ── Memory: Available Memory Bytes (average across instances, per day) ──
+    mem_avgs: list[float] = []
+    if mem_metric and mem_metric.timeseries:
+        for ts in mem_metric.timeseries:
+            for point in ts.data or []:
+                if point.average is not None:
+                    mem_avgs.append(point.average)
+    if mem_avgs:
+        result["avg_available_mem_bytes"] = statistics.mean(mem_avgs)
+
+    return result
+
+
+def _compute_mem_pct(
+    metrics: dict[str, float] | None,
+    memory_gb: float,
+) -> float | None:
+    """Convert avg_available_mem_bytes → used memory %.
+
+    Uses Available Memory Bytes (avg per instance per day) and the per-node
+    total RAM from the SKU catalog.  Returns None when either value is absent.
+    """
+    if not metrics:
+        return None
+    avg_avail = metrics.get("avg_available_mem_bytes")
+    if avg_avail is None or memory_gb <= 0:
+        return None
+    total_bytes = memory_gb * 1024.0 ** 3
+    pct = (1.0 - avg_avail / total_bytes) * 100.0
+    return round(max(0.0, min(100.0, pct)), 2)
 
 
 def _build_row(
@@ -283,5 +326,5 @@ def _build_row(
         p99_cpu_pct=cpu.get("p99") if cpu else None,
         max_cpu_pct=cpu.get("max") if cpu else None,
         min_cpu_pct=cpu.get("min") if cpu else None,
-        avg_mem_pct=None,  # unavailable for VMSS Uniform platform metrics
+        avg_mem_pct=_compute_mem_pct(cpu, memory_gb),
     )
