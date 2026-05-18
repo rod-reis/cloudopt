@@ -599,6 +599,7 @@ def collect(
         scope=scope,
         vms_sub_regions=sub_regions_from_vms(vms),
         quota_alert_pct=thresholds.quota_alert_pct,
+        metrics_days=eff_metric_days,
     )
     quota_alerts = sum(1 for q in quota_items if q.alert)
     console.print(
