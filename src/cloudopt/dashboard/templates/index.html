@@ -897,7 +897,14 @@
             <select id="grp-type-filter" onchange="renderGroups()">
               <option value="">All</option>
               <option value="VMSS">VMSS</option>
-              <option value="VMSS Uniform">VMSS Uniform</option>
+              <option value="VMSS Uniform">VMSS Uniform (all)</option>
+              <option value="VMSS Uniform (AKS)">VMSS Uniform – AKS</option>
+              <option value="VMSS Uniform (AVD)">VMSS Uniform – AVD</option>
+              <option value="VMSS Uniform (Databricks)">VMSS Uniform – Databricks</option>
+              <option value="VMSS Uniform (Azure Batch)">VMSS Uniform – Azure Batch</option>
+              <option value="VMSS Uniform (AML)">VMSS Uniform – AML</option>
+              <option value="VMSS Uniform (ARO)">VMSS Uniform – ARO</option>
+              <option value="VMSS Uniform (HDInsight)">VMSS Uniform – HDInsight</option>
               <option value="AvailabilitySet">Availability Set</option>
               <option value="None">Ungrouped</option>
             </select>
@@ -1947,7 +1954,11 @@
           document.getElementById("grp-search").value || ""
         ).toLowerCase();
         var items = groupData;
-        if (type)
+        if (type === "VMSS Uniform")
+          items = items.filter(function (g) {
+            return g.group_type.indexOf("VMSS Uniform") === 0;
+          });
+        else if (type)
           items = items.filter(function (g) {
             return g.group_type === type;
           });
@@ -1964,6 +1975,20 @@
           if (t === "VMSS") return '<span class="badge badge-vmss">VMSS</span>';
           if (t === "VMSS Uniform")
             return '<span class="badge badge-vmss">VMSS\u00a0Uniform</span>';
+          if (t === "VMSS Uniform (AKS)")
+            return '<span class="badge badge-vmss">VMSS\u00a0Uniform\u00a0(AKS)</span>';
+          if (t === "VMSS Uniform (AVD)")
+            return '<span class="badge badge-vmss">VMSS\u00a0Uniform\u00a0(AVD)</span>';
+          if (t === "VMSS Uniform (Databricks)")
+            return '<span class="badge badge-vmss">VMSS\u00a0Uniform\u00a0(Databricks)</span>';
+          if (t === "VMSS Uniform (Azure Batch)")
+            return '<span class="badge badge-vmss">VMSS\u00a0Uniform\u00a0(Azure\u00a0Batch)</span>';
+          if (t === "VMSS Uniform (AML)")
+            return '<span class="badge badge-vmss">VMSS\u00a0Uniform\u00a0(AML)</span>';
+          if (t === "VMSS Uniform (ARO)")
+            return '<span class="badge badge-vmss">VMSS\u00a0Uniform\u00a0(ARO)</span>';
+          if (t === "VMSS Uniform (HDInsight)")
+            return '<span class="badge badge-vmss">VMSS\u00a0Uniform\u00a0(HDInsight)</span>';
           if (t === "AvailabilitySet")
             return '<span class="badge badge-avset">AvSet</span>';
           return '<span class="badge badge-none">\u2014</span>';

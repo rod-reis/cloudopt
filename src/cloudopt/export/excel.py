@@ -248,11 +248,23 @@ def read_quota_from_workbook(path: Path) -> list[QuotaItem]:
     return _read_quota_sheet(wb)
 
 
-def read_vmss_groups_from_workbook(path: Path) -> list[ManagedComputeGroupRow]:
-    """Read VMSS Uniform groups from the 'Perf by VM Group' sheet.
+_RESOURCE_TYPE_TO_SERVICE: dict[str, ParentServiceType] = {
+    "microsoft.containerservice/managedclusters": ParentServiceType.AKS,
+    "microsoft.desktopvirtualization/hostpools": ParentServiceType.AVD,
+    "microsoft.databricks/workspaces": ParentServiceType.DATABRICKS,
+    "microsoft.batch/batchaccounts": ParentServiceType.AZURE_BATCH,
+    "microsoft.machinelearningservices/workspaces": ParentServiceType.AML,
+    "microsoft.redhatopenshift/openshiftclusters": ParentServiceType.ARO,
+    "microsoft.hdinsight/clusters": ParentServiceType.HDINSIGHT,
+}
 
-    Identifies Uniform VMSS rows by an empty 'Parent ResourceType' column,
-    which distinguishes them from AKS/AVD/etc. managed service rows.
+
+def read_vmss_groups_from_workbook(path: Path) -> list[ManagedComputeGroupRow]:
+    """Read all VMSS Uniform groups from the 'Perf by VM Group' sheet.
+
+    Includes both standalone VMSS Uniform rows (empty 'Parent ResourceType')
+    and managed-service-associated rows (AKS, AVD, Databricks, etc.).
+    The parent_service_type is inferred from the 'Parent ResourceType' column.
     """
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     ws = wb["Perf by VM Group"] if "Perf by VM Group" in wb.sheetnames else None
@@ -284,16 +296,19 @@ def read_vmss_groups_from_workbook(path: Path) -> list[ManagedComputeGroupRow]:
     results: list[ManagedComputeGroupRow] = []
     for row in ws.iter_rows(min_row=2, values_only=True):
         row_vals = list(row)
-        # Empty "Parent ResourceType" → VMSS Uniform (not a managed service)
-        parent_resource_type = _get(row_vals, "Parent ResourceType")
         vmss_name = _get(row_vals, "VMSS Name")
-        if parent_resource_type or not vmss_name:
+        if not vmss_name:
             continue
+        parent_resource_type = _get(row_vals, "Parent ResourceType")
+        prt_str = str(parent_resource_type or "").strip().lower()
+        svc_type = _RESOURCE_TYPE_TO_SERVICE.get(prt_str, ParentServiceType.STANDALONE_VMSS)
         try:
             results.append(ManagedComputeGroupRow(
-                parent_service_type=ParentServiceType.STANDALONE_VMSS,
+                parent_service_type=svc_type,
+                parent_resource_type=str(parent_resource_type) if parent_resource_type else None,
+                parent_service_name=str(_get(row_vals, "Parent ResourceName") or vmss_name),
+                parent_pool_name=str(_get(row_vals, "Parent Pool/Node Group Name") or "") or None,
                 vmss_name=str(vmss_name),
-                parent_service_name=str(vmss_name),
                 vm_sku=str(_get(row_vals, "VM SKU") or ""),
                 instance_count=_int(_get(row_vals, "Instance Count")),
                 subscription_name=str(_get(row_vals, "Subscription") or ""),

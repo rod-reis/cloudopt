@@ -665,12 +665,23 @@ def _aggregate_flat_groups(
         })
 
     # Merge VMSS Uniform groups — these don't surface as individual VMs in ARG
+    _SVC_LABEL: dict[str, str] = {
+        "AKS": "VMSS Uniform (AKS)",
+        "AVD": "VMSS Uniform (AVD)",
+        "Databricks": "VMSS Uniform (Databricks)",
+        "Azure Batch": "VMSS Uniform (Azure Batch)",
+        "AML": "VMSS Uniform (AML)",
+        "ARO": "VMSS Uniform (ARO)",
+        "HDInsight": "VMSS Uniform (HDInsight)",
+    }
     for g in (_DATA.get("vmss_groups") or []):
+        svc_val = g.parent_service_type.value if g.parent_service_type else "Standalone VMSS"
+        group_type = _SVC_LABEL.get(svc_val, "VMSS Uniform")
         result.append({
             "subscription_name": g.subscription_name,
             "resource_group": g.resource_group,
             "group_name": g.vmss_name or g.parent_service_name or "(unknown)",
-            "group_type": "VMSS Uniform",
+            "group_type": group_type,
             "vm_sku": g.vm_sku,
             "vm_count": g.instance_count,
             "avg_cpu_pct": g.avg_cpu_pct,
