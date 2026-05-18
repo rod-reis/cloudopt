@@ -37,6 +37,7 @@ _DATA: dict[str, Any] = {
     "deployment_failures": [],
     "findings": [],
     "source_coverage": [],
+    "vmss_groups": [],
 }
 
 
@@ -111,7 +112,7 @@ def create_app(data_path: Path) -> FastAPI:
 
     @app.get("/api/summary/groups")
     async def summary_groups():
-        return _aggregate_flat_groups(_DATA["vms"], _DATA["metrics_by_vm"])
+        return _aggregate_flat_groups(_DATA["vms"], _DATA["metrics_by_vm"], _DATA["vmss_groups"])
 
     @app.get("/api/recommendations")
     async def recommendations(category: str | None = Query(None)):
@@ -290,6 +291,16 @@ def _load_json(path: Path) -> None:
         except Exception:
             pass
     _DATA["deployment_failures"] = depfail
+
+    # --- VMSS Uniform groups ---
+    from cloudopt.models import ManagedComputeGroupRow
+    vmss_groups: list[ManagedComputeGroupRow] = []
+    for d in raw.get("vmss_groups", []):
+        try:
+            vmss_groups.append(ManagedComputeGroupRow(**d))
+        except Exception:
+            pass
+    _DATA["vmss_groups"] = vmss_groups
 
     # --- Detector pipeline → Finding list --------------------------------
     from cloudopt.analyzer.detectors import run_all
@@ -484,6 +495,7 @@ def _aggregate_flat_rg(
 def _aggregate_flat_groups(
     vms: list[VmInventory],
     metrics_by_vm: dict,
+    vmss_groups: list | None = None,
 ) -> list[dict]:
     """Flat rows: one per (subscription_name, resource_group, group_name, group_type, vm_sku)."""
     groups: dict[tuple, list[VmInventory]] = {}
@@ -508,6 +520,21 @@ def _aggregate_flat_groups(
             "avg_cpu_pct": _avg_metric_group(group_vms, metrics_by_vm, "Percentage CPU", "avg"),
             "avg_mem_pct": _avg_mem_pct_group(group_vms, metrics_by_vm),
         })
+
+    # Merge VMSS Uniform groups — these don't surface as individual VMs in ARG
+    for g in (vmss_groups or []):
+        result.append({
+            "subscription_name": g.subscription_name,
+            "resource_group": g.resource_group,
+            "group_name": g.vmss_name or g.parent_service_name or "(unknown)",
+            "group_type": "VMSS Uniform",
+            "vm_sku": g.vm_sku,
+            "vm_count": g.instance_count,
+            "avg_cpu_pct": g.avg_cpu_pct,
+            "avg_mem_pct": g.avg_mem_pct,
+        })
+
+    result.sort(key=lambda r: (r["subscription_name"], r["resource_group"], r["group_name"], r["vm_sku"]))
     return result
 
 

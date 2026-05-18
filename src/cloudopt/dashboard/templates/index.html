@@ -368,13 +368,14 @@
           <div class="toolbar">
             <h1>VM Groups</h1>
             <small style="color: var(--muted)"
-              >VMSS, Availability Sets, and ungrouped VMs</small
+              >VMSS, VMSS Uniform, Availability Sets, and ungrouped VMs</small
             >
           </div>
           <div class="filters">
             <select id="group-type-filter" onchange="renderGroups()">
               <option value="">All group types</option>
               <option value="VMSS">VMSS</option>
+              <option value="VMSS Uniform">VMSS Uniform</option>
               <option value="AvailabilitySet">Availability Set</option>
               <option value="None">Ungrouped</option>
             </select>
@@ -959,6 +960,7 @@
       function groupTypePill(t) {
         const map = {
           VMSS: "pill-blue",
+          "VMSS Uniform": "pill-yellow",
           AvailabilitySet: "pill-green",
           None: "pill-gray",
         };
