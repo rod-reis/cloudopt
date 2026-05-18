@@ -101,17 +101,45 @@ def create_app(data_path: Path) -> FastAPI:
                 }
         raise HTTPException(status_code=404, detail="VM not found")
 
+    @app.get("/api/summary/overview")
+    async def summary_overview():
+        return _build_overview(_DATA["vms"], _DATA["findings"], _DATA["quota"])
+
     @app.get("/api/summary/subscription")
     async def summary_subscription():
-        return _aggregate_flat_sub(_DATA["vms"], _DATA["metrics_by_vm"])
+        return _aggregate_by_subscription(_DATA["vms"], _DATA["metrics_by_vm"], _DATA["findings"])
 
     @app.get("/api/summary/resource-group")
     async def summary_resource_group():
-        return _aggregate_flat_rg(_DATA["vms"], _DATA["metrics_by_vm"])
+        return _aggregate_by_rg(_DATA["vms"], _DATA["metrics_by_vm"], _DATA["findings"])
 
     @app.get("/api/summary/groups")
     async def summary_groups():
-        return _aggregate_flat_groups(_DATA["vms"], _DATA["metrics_by_vm"])
+        return _aggregate_flat_groups(_DATA["vms"], _DATA["metrics_by_vm"], _DATA["findings"])
+
+    @app.get("/api/summary/sku")
+    async def summary_sku():
+        return _aggregate_by_sku(_DATA["vms"], _DATA["metrics_by_vm"])
+
+    @app.get("/api/summary/per-vm")
+    async def summary_per_vm(
+        subscription: str | None = Query(None),
+        resource_group: str | None = Query(None),
+        sku: str | None = Query(None),
+        search: str | None = Query(None),
+    ):
+        return _aggregate_per_vm(
+            _DATA["vms"], _DATA["metrics_by_vm"], _DATA["findings"],
+            subscription, resource_group, sku, search,
+        )
+
+    @app.get("/api/vm-insights")
+    async def vm_insights_view(
+        subscription: str | None = Query(None),
+        resource_group: str | None = Query(None),
+        search: str | None = Query(None),
+    ):
+        return _get_vm_insights(_DATA["vms"], _DATA["metrics_by_vm"], subscription, resource_group, search)
 
     @app.get("/api/recommendations")
     async def recommendations(category: str | None = Query(None)):
@@ -193,6 +221,7 @@ def create_app(data_path: Path) -> FastAPI:
         type: str | None = Query(None),
         category: str | None = Query(None),
         readiness: str | None = Query(None),
+        confidence: str | None = Query(None),
     ):
         items = _DATA["findings"]
         if type:
@@ -201,7 +230,9 @@ def create_app(data_path: Path) -> FastAPI:
             items = [f for f in items if f.category.value.lower() == category.lower()]
         if readiness:
             items = [f for f in items if f.readiness.value.lower() == readiness.lower()]
-        return [f.model_dump() for f in items]
+        if confidence:
+            items = [f for f in items if f.confidence and f.confidence.value.lower() == confidence.lower()]
+        return [_finding_json(f) for f in items]
 
     @app.get("/api/source-coverage")
     async def source_coverage_view():
@@ -226,6 +257,32 @@ def _load_excel(path: Path) -> None:
     vms, metrics, recommendations, metadata = read_workbook(path)
     quota = read_quota_from_workbook(path)
     _store(vms, metrics, recommendations, metadata, quota)
+    # Excel path: no capacity reservations or deployment failures stored in workbook
+    _DATA["capacity_reservations"] = []
+    _DATA["deployment_failures"] = []
+    # Run detector pipeline so findings are available
+    from cloudopt.analyzer.detectors import run_all
+    from cloudopt.analyzer.sku_catalog import OfflineSkuCatalog
+    meta = _DATA.get("metadata")
+    thresholds = meta.thresholds if meta else None
+    try:
+        from cloudopt.models import CollectionThresholds
+        if thresholds is None:
+            thresholds = CollectionThresholds()
+        findings = run_all(
+            vms=vms,
+            metrics=metrics,
+            quota_items=_DATA.get("quota", []),
+            thresholds=thresholds,
+            catalog=OfflineSkuCatalog(),
+            resources=None,
+            rsvp_orders=_DATA.get("reservations", []),
+            crg_items=[],
+            enriched_map=None,
+        )
+    except Exception:
+        findings = []
+    _DATA["findings"] = findings
 
 
 def _load_json(path: Path) -> None:
@@ -366,6 +423,25 @@ def _vm_json(vm: VmInventory) -> dict:
     }
 
 
+def _finding_json(f: Any) -> dict:
+    return {
+        "vm_id": f.vm_id,
+        "category": f.category.value,
+        "subcategory": f.subcategory.value if f.subcategory else None,
+        "code": f.code,
+        "finding_type": f.finding_type.value,
+        "current": f.current,
+        "proposed": f.proposed,
+        "deltas": f.deltas,
+        "evidence_sources": f.evidence_sources,
+        "confidence": f.confidence.value if f.confidence else None,
+        "readiness": f.readiness.value,
+        "blockers_to_high": f.blockers_to_high,
+        "customer_inputs_needed": f.customer_inputs_needed,
+        "rationale": f.rationale,
+    }
+
+
 def _rec_json(r: VmRecommendation) -> dict:
     return {
         "priority": r.priority,
@@ -418,65 +494,122 @@ def _filter_vms(
     return result
 
 
-def _aggregate_by(
+def _build_overview(
+    vms: list[VmInventory],
+    findings: list[Any],
+    quota: list[Any],
+) -> dict:
+    from cloudopt.analyzer.taxonomy import Readiness, Confidence, Category
+    recs = [f for f in findings if f.finding_type.value == "RECOMMENDATION"]
+    by_cat: dict[str, dict] = {}
+    for cat in Category:
+        cat_recs = [f for f in recs if f.category == cat]
+        by_cat[cat.value] = {
+            "total": len(cat_recs),
+            "ready": sum(1 for f in cat_recs if f.readiness == Readiness.READY),
+            "likely": sum(1 for f in cat_recs if f.readiness == Readiness.LIKELY),
+            "discovery": sum(1 for f in cat_recs if f.readiness == Readiness.DISCOVERY),
+            "insufficient": sum(1 for f in cat_recs if f.readiness == Readiness.INSUFFICIENT),
+        }
+    by_conf: dict[str, int] = {conf.value: sum(1 for f in recs if f.confidence == conf) for conf in Confidence}
+    return {
+        "total_vms": len(vms),
+        "running_vms": sum(1 for v in vms if not _is_stopped(v)),
+        "stopped_vms": sum(1 for v in vms if _is_stopped(v)),
+        "total_findings": len(findings),
+        "total_recommendations": len(recs),
+        "ready_count": sum(1 for f in recs if f.readiness == Readiness.READY),
+        "likely_count": sum(1 for f in recs if f.readiness == Readiness.LIKELY),
+        "discovery_count": sum(1 for f in recs if f.readiness == Readiness.DISCOVERY),
+        "quota_alerts": sum(1 for q in quota if q.alert),
+        "by_category": by_cat,
+        "by_confidence": by_conf,
+    }
+
+
+def _aggregate_by_subscription(
     vms: list[VmInventory],
     metrics_by_vm: dict,
-    group_field: str,
+    findings: list[Any],
 ) -> list[dict]:
+    """One row per subscription."""
     groups: dict[str, list[VmInventory]] = {}
     for vm in vms:
-        key = getattr(vm, group_field, None) or "(unknown)"
-        groups.setdefault(key, []).append(vm)
-
+        groups.setdefault(vm.subscription_name, []).append(vm)
+    # index findings by vm_id
+    from cloudopt.analyzer.taxonomy import Readiness
+    findings_by_vm: dict[str, list] = {}
+    for f in findings:
+        findings_by_vm.setdefault(f.vm_id, []).append(f)
     result = []
-    for group_name, group_vms in sorted(groups.items()):
-        result.append({
-            "group_name": group_name,
-            "vm_count": len(group_vms),
-            "avg_cpu_pct": _avg_metric_group(group_vms, metrics_by_vm, "Percentage CPU", "avg"),
-            "avg_mem_pct": _avg_mem_pct_group(group_vms, metrics_by_vm),
-            "sku_distribution": _sku_dist(group_vms),
-        })
-    return result
-
-
-def _aggregate_flat_sub(
-    vms: list[VmInventory],
-    metrics_by_vm: dict,
-) -> list[dict]:
-    """Flat rows: one per (subscription_name, vm_sku)."""
-    groups: dict[tuple, list[VmInventory]] = {}
-    for vm in vms:
-        groups.setdefault((vm.subscription_name, vm.vm_sku), []).append(vm)
-    result = []
-    for (sub_name, sku), group_vms in sorted(groups.items()):
+    for sub_name, sub_vms in sorted(groups.items()):
+        vm_ids = {v.resource_id for v in sub_vms}
+        sub_findings = [f for vid in vm_ids for f in findings_by_vm.get(vid, [])]
         result.append({
             "subscription_name": sub_name,
-            "vm_sku": sku,
-            "vm_count": len(group_vms),
-            "avg_cpu_pct": _avg_metric_group(group_vms, metrics_by_vm, "Percentage CPU", "avg"),
-            "avg_mem_pct": _avg_mem_pct_group(group_vms, metrics_by_vm),
+            "vm_count": len(sub_vms),
+            "running_count": sum(1 for v in sub_vms if not _is_stopped(v)),
+            "stopped_count": sum(1 for v in sub_vms if _is_stopped(v)),
+            "avg_cpu_pct": _avg_metric_group(sub_vms, metrics_by_vm, "Percentage CPU", "avg"),
+            "avg_mem_pct": _avg_mem_pct_group(sub_vms, metrics_by_vm),
+            "finding_count": len(sub_findings),
+            "ready_count": sum(1 for f in sub_findings if f.readiness == Readiness.READY),
+            "sku_distribution": _sku_dist(sub_vms),
         })
     return result
 
 
-def _aggregate_flat_rg(
+def _aggregate_by_rg(
     vms: list[VmInventory],
     metrics_by_vm: dict,
+    findings: list[Any],
 ) -> list[dict]:
-    """Flat rows: one per (subscription_name, resource_group, vm_sku)."""
+    """One row per (subscription, resource_group)."""
     groups: dict[tuple, list[VmInventory]] = {}
     for vm in vms:
-        groups.setdefault((vm.subscription_name, vm.resource_group, vm.vm_sku), []).append(vm)
+        groups.setdefault((vm.subscription_name, vm.resource_group), []).append(vm)
+    from cloudopt.analyzer.taxonomy import Readiness
+    findings_by_vm: dict[str, list] = {}
+    for f in findings:
+        findings_by_vm.setdefault(f.vm_id, []).append(f)
     result = []
-    for (sub_name, rg, sku), group_vms in sorted(groups.items()):
+    for (sub_name, rg), rg_vms in sorted(groups.items()):
+        vm_ids = {v.resource_id for v in rg_vms}
+        rg_findings = [f for vid in vm_ids for f in findings_by_vm.get(vid, [])]
         result.append({
             "subscription_name": sub_name,
             "resource_group": rg,
+            "vm_count": len(rg_vms),
+            "running_count": sum(1 for v in rg_vms if not _is_stopped(v)),
+            "stopped_count": sum(1 for v in rg_vms if _is_stopped(v)),
+            "avg_cpu_pct": _avg_metric_group(rg_vms, metrics_by_vm, "Percentage CPU", "avg"),
+            "avg_mem_pct": _avg_mem_pct_group(rg_vms, metrics_by_vm),
+            "finding_count": len(rg_findings),
+            "ready_count": sum(1 for f in rg_findings if f.readiness == Readiness.READY),
+        })
+    return result
+
+
+def _aggregate_by_sku(
+    vms: list[VmInventory],
+    metrics_by_vm: dict,
+) -> list[dict]:
+    """One row per vm_sku."""
+    groups: dict[str, list[VmInventory]] = {}
+    for vm in vms:
+        groups.setdefault(vm.vm_sku, []).append(vm)
+    result = []
+    for sku, sku_vms in sorted(groups.items(), key=lambda x: -len(x[1])):
+        sample = sku_vms[0]
+        result.append({
             "vm_sku": sku,
-            "vm_count": len(group_vms),
-            "avg_cpu_pct": _avg_metric_group(group_vms, metrics_by_vm, "Percentage CPU", "avg"),
-            "avg_mem_pct": _avg_mem_pct_group(group_vms, metrics_by_vm),
+            "vcpus": sample.vcpus,
+            "memory_gb": sample.memory_gb,
+            "vm_count": len(sku_vms),
+            "running_count": sum(1 for v in sku_vms if not _is_stopped(v)),
+            "stopped_count": sum(1 for v in sku_vms if _is_stopped(v)),
+            "avg_cpu_pct": _avg_metric_group(sku_vms, metrics_by_vm, "Percentage CPU", "avg"),
+            "avg_mem_pct": _avg_mem_pct_group(sku_vms, metrics_by_vm),
         })
     return result
 
@@ -484,6 +617,7 @@ def _aggregate_flat_rg(
 def _aggregate_flat_groups(
     vms: list[VmInventory],
     metrics_by_vm: dict,
+    findings: list[Any] | None = None,
 ) -> list[dict]:
     """Flat rows: one per (subscription_name, resource_group, group_name, group_type, vm_sku)."""
     groups: dict[tuple, list[VmInventory]] = {}
@@ -496,8 +630,14 @@ def _aggregate_flat_groups(
             g_name, g_type = "(ungrouped)", "None"
         key = (vm.subscription_name, vm.resource_group, g_name, g_type, vm.vm_sku)
         groups.setdefault(key, []).append(vm)
+    from cloudopt.analyzer.taxonomy import Readiness
+    findings_by_vm: dict[str, list] = {}
+    for f in (findings or []):
+        findings_by_vm.setdefault(f.vm_id, []).append(f)
     result = []
     for (sub_name, rg, g_name, g_type, sku), group_vms in sorted(groups.items()):
+        vm_ids = {v.resource_id for v in group_vms}
+        grp_findings = [f for vid in vm_ids for f in findings_by_vm.get(vid, [])]
         result.append({
             "subscription_name": sub_name,
             "resource_group": rg,
@@ -507,8 +647,26 @@ def _aggregate_flat_groups(
             "vm_count": len(group_vms),
             "avg_cpu_pct": _avg_metric_group(group_vms, metrics_by_vm, "Percentage CPU", "avg"),
             "avg_mem_pct": _avg_mem_pct_group(group_vms, metrics_by_vm),
+            "finding_count": len(grp_findings),
+            "ready_count": sum(1 for f in grp_findings if f.readiness == Readiness.READY),
         })
     return result
+
+
+def _aggregate_flat_sub(
+    vms: list[VmInventory],
+    metrics_by_vm: dict,
+) -> list[dict]:
+    """Kept for compatibility — delegates to _aggregate_by_subscription."""
+    return _aggregate_by_subscription(vms, metrics_by_vm, _DATA.get("findings", []))
+
+
+def _aggregate_flat_rg(
+    vms: list[VmInventory],
+    metrics_by_vm: dict,
+) -> list[dict]:
+    """Kept for compatibility — delegates to _aggregate_by_rg."""
+    return _aggregate_by_rg(vms, metrics_by_vm, _DATA.get("findings", []))
 
 
 def _rec_action_text(r: VmRecommendation) -> str:
@@ -566,3 +724,116 @@ def _sku_dist(vms: list[VmInventory]) -> dict[str, int]:
     for vm in vms:
         dist[vm.vm_sku] = dist.get(vm.vm_sku, 0) + 1
     return dict(sorted(dist.items(), key=lambda x: -x[1]))
+
+
+def _aggregate_per_vm(
+    vms: list[VmInventory],
+    metrics_by_vm: dict,
+    findings: list[Any],
+    subscription: str | None = None,
+    resource_group: str | None = None,
+    sku: str | None = None,
+    search: str | None = None,
+) -> list[dict]:
+    """One row per VM — used by the Perf by VM view."""
+    from cloudopt.analyzer.taxonomy import Readiness
+
+    findings_by_vm: dict[str, list] = {}
+    for f in findings:
+        findings_by_vm.setdefault(f.vm_id, []).append(f)
+
+    result_vms = list(vms)
+    if subscription:
+        result_vms = [v for v in result_vms if v.subscription_name == subscription]
+    if resource_group:
+        result_vms = [v for v in result_vms if v.resource_group == resource_group]
+    if sku:
+        result_vms = [v for v in result_vms if v.vm_sku == sku]
+    if search:
+        q = search.lower()
+        result_vms = [
+            v for v in result_vms
+            if q in v.vm_name.lower() or q in v.resource_group.lower()
+        ]
+
+    result = []
+    for vm in result_vms:
+        vm_findings = findings_by_vm.get(vm.resource_id, [])
+        avset_vmss = vm.availability_set_name or vm.vmss_name or None
+        result.append({
+            "vm_name": vm.vm_name,
+            "subscription_name": vm.subscription_name,
+            "resource_group": vm.resource_group,
+            "region": vm.region,
+            "zone": vm.availability_zone,
+            "vm_sku": vm.vm_sku,
+            "vcpus": vm.vcpus,
+            "memory_gb": vm.memory_gb,
+            "power_state": vm.power_state,
+            "avset_vmss": avset_vmss,
+            "avg_cpu_pct": _avg_metric_group([vm], metrics_by_vm, "Percentage CPU", "avg"),
+            "p95_cpu_pct": _avg_metric_group([vm], metrics_by_vm, "Percentage CPU", "p95"),
+            "avg_mem_pct": _avg_mem_pct_group([vm], metrics_by_vm),
+            "finding_count": len(vm_findings),
+            "ready_count": sum(1 for f in vm_findings if f.readiness == Readiness.READY),
+        })
+    return result
+
+
+def _get_vm_insights(
+    vms: list[VmInventory],
+    metrics_by_vm: dict,
+    subscription: str | None = None,
+    resource_group: str | None = None,
+    search: str | None = None,
+) -> list[dict]:
+    """Per-VM platform metric row for the VM Insights view."""
+
+    def _bytes_to_mbps(m_obj: Any, stat: str = "avg") -> float | None:
+        if m_obj is None:
+            return None
+        v = getattr(m_obj, stat, None)
+        return round(v / (1024 * 1024), 3) if v is not None else None
+
+    result = []
+    for vm in vms:
+        if subscription and vm.subscription_name != subscription:
+            continue
+        if resource_group and vm.resource_group != resource_group:
+            continue
+        if search:
+            q = search.lower()
+            if q not in vm.vm_name.lower() and q not in vm.resource_group.lower():
+                continue
+
+        m = metrics_by_vm.get(vm.resource_id, {})
+        cpu_m = m.get("Percentage CPU")
+        mem_m = m.get("Available Memory Bytes")
+        disk_read_m = m.get("Disk Read Bytes/Sec") or m.get("Data Disk Read Bytes/sec") or m.get("OS Disk Read Bytes/sec")
+        disk_write_m = m.get("Disk Write Bytes/Sec") or m.get("Data Disk Write Bytes/sec") or m.get("OS Disk Write Bytes/sec")
+        net_in_m = m.get("Network In Total") or m.get("Network In")
+        net_out_m = m.get("Network Out Total") or m.get("Network Out")
+
+        avg_cpu = round(cpu_m.avg, 2) if cpu_m and cpu_m.avg is not None else None
+        p95_cpu = round(cpu_m.p95, 2) if cpu_m and getattr(cpu_m, "p95", None) is not None else None
+        avg_mem_pct: float | None = None
+        if mem_m and mem_m.avg is not None and vm.memory_gb > 0:
+            avail_gb = mem_m.avg / (1024 ** 3)
+            avg_mem_pct = round(max(0.0, min(100.0, (1 - avail_gb / vm.memory_gb) * 100)), 2)
+
+        row: dict = {
+            "vm_name": vm.vm_name,
+            "subscription_name": vm.subscription_name,
+            "resource_group": vm.resource_group,
+            "vm_sku": vm.vm_sku,
+            "avg_cpu_pct": avg_cpu,
+            "p95_cpu_pct": p95_cpu,
+            "avg_mem_pct": avg_mem_pct,
+            "disk_read_mbps": _bytes_to_mbps(disk_read_m),
+            "disk_write_mbps": _bytes_to_mbps(disk_write_m),
+            "net_in_mbps": _bytes_to_mbps(net_in_m),
+            "net_out_mbps": _bytes_to_mbps(net_out_m),
+            "has_metrics": bool(m),
+        }
+        result.append(row)
+    return result

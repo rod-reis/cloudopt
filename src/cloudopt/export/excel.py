@@ -198,7 +198,11 @@ def write_workbook(
     sheet_sku_by_subscription(wb, vms, metrics_by_vm)
     # Sheet 10 — Perf by VM SKU per Resource Group
     sheet_sku_by_resource_group(wb, vms, metrics_by_vm)
-    # Sheets 11-17 — Managed service sheets
+    # Sheet 11 — Fleet Inventory (VM-only; required by read_workbook → dashboard)
+    _sheet_inventory(wb, vms)
+    # Sheet 12 — Raw Metrics (required by read_workbook → dashboard)
+    _sheet_raw_metrics(wb, metrics)
+    # Sheets 13–19 — Managed service sheets
     for svc_type in (
         ParentServiceType.AKS,
         ParentServiceType.AVD,
@@ -210,15 +214,15 @@ def write_workbook(
     ):
         svc_groups = [g for g in _groups if g.parent_service_type == svc_type]
         sheet_managed_service(wb, svc_type, svc_groups)
-    # Sheet 18 — Resource Inventory
+    # Sheet 20 — Resource Inventory
     _sheet_resources(wb, resources or [])
-    # Sheet 19 — Capacity Reservations
+    # Sheet 21 — Capacity Reservations
     _sheet_capacity_reservations(wb, capacity_reservations or [])
-    # Sheet 20 — Deployment Failures
+    # Sheet 22 — Deployment Failures
     _sheet_deployment_failures(wb, deployment_failures or [])
-    # Sheet 21 — Run Metadata
+    # Sheet 23 — Run Metadata
     _sheet_metadata(wb, metadata)
-    # Sheet 22 — App Insights (last per user decision)
+    # Sheet 24 — App Insights (last per user decision)
     _sheet_appinsights(wb, _appinsights, _appinsights_metrics)
 
     wb.save(path)
@@ -2109,9 +2113,12 @@ def _sheet_deployment_failures(
 # ---------------------------------------------------------------------------
 
 def _read_inventory_sheet(wb) -> list[VmInventory]:
-    # Support Phase C "Resource Inventory", Phase B "Fleet Inventory", and legacy "VM Inventory"
+    # "Fleet Inventory" is the canonical VM-only sheet written since the excel-restructure.
+    # "VM Inventory" is the legacy name from earlier builds.
+    # "Resource Inventory" intentionally excluded — it holds ALL ARM resource types and
+    # does not contain VM-specific columns (vCPUs, Memory, Power State etc.).
     sheet_name = next(
-        (n for n in ("Fleet Inventory", "VM Inventory", "Resource Inventory") if n in wb.sheetnames), None
+        (n for n in ("Fleet Inventory", "VM Inventory") if n in wb.sheetnames), None
     )
     if sheet_name is None:
         return []

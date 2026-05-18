@@ -3,1015 +3,2744 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Azure CLOUDOPT Collector</title>
+    <title>Cloud Efficiency Optimization</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
     <style>
-      *,
-      *::before,
-      *::after {
+      :root {
+        --navy: #1f4e79;
+        --azure: #2e75b6;
+        --azure-lt: #bdd7ee;
+        --green: #375623;
+        --green-lt: #e2efda;
+        --amber: #7d6608;
+        --amber-lt: #fff2cc;
+        --red: #9c0006;
+        --red-lt: #ffc7ce;
+        --purple: #5c2d91;
+        --purple-lt: #e8d5f5;
+        --teal: #006064;
+        --teal-lt: #e0f7fa;
+        --bg: #f0f4f9;
+        --sidebar-bg: #1a2b3c;
+        --sidebar-hover: #243d52;
+        --sidebar-active: #2e75b6;
+        --card: #ffffff;
+        --border: #d0dce8;
+        --text: #1a2433;
+        --muted: #6b7a99;
+        --font: "Segoe UI", system-ui, -apple-system, sans-serif;
+      }
+      * {
         box-sizing: border-box;
         margin: 0;
         padding: 0;
       }
-
-      :root {
-        --blue: #1f4e79;
-        --blue-lt: #2e75b6;
-        --green: #375623;
-        --yellow: #7d6608;
-        --red: #9c0006;
-        --bg: #f3f6fa;
-        --card: #ffffff;
-        --border: #d0dce8;
-        --text: #1a2433;
-        --muted: #637390;
-        --csa: #bdd7ee;
-      }
-
       body {
-        font-family: "Segoe UI", system-ui, sans-serif;
+        font-family: var(--font);
         background: var(--bg);
         color: var(--text);
+        display: flex;
+        min-height: 100vh;
         font-size: 14px;
+      }
+
+      /* Sidebar */
+      #sidebar {
+        width: 220px;
+        min-width: 220px;
+        background: var(--sidebar-bg);
+        display: flex;
+        flex-direction: column;
+        position: fixed;
+        top: 0;
+        left: 0;
+        height: 100vh;
+        overflow-y: auto;
+        z-index: 100;
+      }
+      #sidebar-header {
+        padding: 16px 14px 12px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      }
+      #sidebar-header .logo {
+        font-size: 13px;
+        font-weight: 700;
+        color: #fff;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+      }
+      #sidebar-header .sub {
+        font-size: 11px;
+        color: rgba(255, 255, 255, 0.45);
+        margin-top: 2px;
+      }
+      .nav-group {
+        margin-top: 6px;
+      }
+      .nav-label {
+        padding: 10px 14px 4px;
+        font-size: 10px;
+        font-weight: 700;
+        color: rgba(255, 255, 255, 0.35);
+        text-transform: uppercase;
+        letter-spacing: 0.8px;
+      }
+      .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 9px 14px;
+        cursor: pointer;
+        color: rgba(255, 255, 255, 0.7);
+        font-size: 13px;
+        transition:
+          background 0.15s,
+          color 0.15s;
+        border-left: 3px solid transparent;
+      }
+      .nav-item:hover {
+        background: var(--sidebar-hover);
+        color: #fff;
+      }
+      .nav-item.active {
+        background: rgba(46, 117, 182, 0.25);
+        color: #fff;
+        border-left-color: var(--azure);
+      }
+      .nav-icon {
+        font-size: 15px;
+        width: 18px;
+        text-align: center;
+        flex-shrink: 0;
       }
 
       /* Layout */
-      #app {
-        display: flex;
-        height: 100vh;
-      }
-      nav {
-        width: 200px;
-        min-width: 200px;
-        background: var(--blue);
+      #main {
+        margin-left: 220px;
+        flex: 1;
         display: flex;
         flex-direction: column;
-        padding: 16px 0;
+        min-height: 100vh;
       }
-      main {
-        flex: 1;
-        overflow-y: auto;
-        padding: 24px;
-      }
-
-      /* Nav */
-      .nav-logo {
-        color: #fff;
-        font-weight: 700;
-        font-size: 13px;
-        padding: 0 16px 20px;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.15);
-      }
-      .nav-logo span {
-        font-size: 11px;
-        font-weight: 400;
-        opacity: 0.7;
-        display: block;
-        margin-top: 2px;
-      }
-      nav a {
-        display: block;
-        color: rgba(255, 255, 255, 0.8);
-        text-decoration: none;
-        padding: 9px 16px;
-        font-size: 13px;
-        border-left: 3px solid transparent;
-        transition: background 0.15s;
-      }
-      nav a:hover,
-      nav a.active {
-        background: rgba(255, 255, 255, 0.12);
-        border-left-color: #fff;
-        color: #fff;
-      }
-      .nav-section {
-        font-size: 10px;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: rgba(255, 255, 255, 0.4);
-        padding: 16px 16px 4px;
-      }
-
-      /* Toolbar */
-      .toolbar {
+      #topbar {
+        background: #fff;
+        border-bottom: 1px solid var(--border);
+        padding: 0 24px;
+        height: 52px;
         display: flex;
         align-items: center;
-        gap: 10px;
-        margin-bottom: 20px;
-        flex-wrap: wrap;
+        justify-content: space-between;
+        position: sticky;
+        top: 0;
+        z-index: 50;
       }
-      .toolbar h1 {
-        font-size: 20px;
+      #topbar h1 {
+        font-size: 16px;
         font-weight: 600;
-        flex: 1;
+        color: var(--navy);
       }
-      button.reload {
-        background: var(--blue-lt);
+      #topbar-meta {
+        font-size: 12px;
+        color: var(--muted);
+        display: flex;
+        gap: 16px;
+        align-items: center;
+      }
+      #reload-btn {
+        padding: 5px 12px;
+        background: var(--azure);
         color: #fff;
         border: none;
-        border-radius: 6px;
-        padding: 7px 14px;
+        border-radius: 5px;
         cursor: pointer;
-        font-size: 13px;
+        font-size: 12px;
+        font-weight: 600;
       }
-      button.reload:hover {
-        background: var(--blue);
+      #reload-btn:hover {
+        background: var(--navy);
+      }
+      #content {
+        padding: 20px 24px;
+        flex: 1;
       }
 
       /* Cards */
-      .cards {
+      .section {
+        display: none;
+      }
+      .section.active {
+        display: block;
+      }
+      .kpi-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-        gap: 14px;
-        margin-bottom: 24px;
+        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+        gap: 12px;
+        margin-bottom: 20px;
       }
-      .card {
+      .kpi-card {
         background: var(--card);
-        border: 1px solid var(--border);
         border-radius: 8px;
-        padding: 16px 18px;
+        padding: 14px 16px;
+        border-left: 4px solid var(--azure);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
       }
-      .card-label {
+      .kpi-card.green {
+        border-left-color: #38a169;
+      }
+      .kpi-card.amber {
+        border-left-color: #d97706;
+      }
+      .kpi-card.red {
+        border-left-color: #e53e3e;
+      }
+      .kpi-card.purple {
+        border-left-color: #805ad5;
+      }
+      .kpi-card.teal {
+        border-left-color: #2c7a7b;
+      }
+      .kpi-label {
         font-size: 11px;
         color: var(--muted);
+        font-weight: 600;
         text-transform: uppercase;
-        letter-spacing: 0.05em;
+        letter-spacing: 0.4px;
+        margin-bottom: 6px;
       }
-      .card-value {
-        font-size: 28px;
+      .kpi-value {
+        font-size: 26px;
         font-weight: 700;
-        margin-top: 4px;
+        color: var(--text);
       }
-      .card-value.green {
-        color: #197a3a;
+      .kpi-sub {
+        font-size: 11px;
+        color: var(--muted);
+        margin-top: 3px;
       }
-      .card-value.yellow {
-        color: #c08b00;
+      .chart-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+        margin-bottom: 20px;
       }
-      .card-value.red {
-        color: #c00000;
+      .chart-row.wide {
+        grid-template-columns: 2fr 1fr;
       }
-
-      /* Filter bar */
-      .filters {
-        display: flex;
-        gap: 8px;
-        flex-wrap: wrap;
-        margin-bottom: 14px;
-      }
-      .filters input,
-      .filters select {
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        padding: 6px 10px;
-        font-size: 13px;
+      .chart-card {
         background: var(--card);
+        border-radius: 8px;
+        padding: 16px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
       }
-      .filters input:focus,
-      .filters select:focus {
-        outline: 2px solid var(--blue-lt);
+      .chart-card h3 {
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--navy);
+        margin-bottom: 12px;
+      }
+      .chart-card canvas {
+        max-height: 280px;
       }
 
       /* Tables */
+      .table-card {
+        background: var(--card);
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+        overflow: hidden;
+        margin-bottom: 20px;
+      }
+      .table-header {
+        padding: 12px 16px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        border-bottom: 1px solid var(--border);
+      }
+      .table-header h3 {
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--navy);
+      }
       .table-wrap {
         overflow-x: auto;
-        border-radius: 8px;
-        border: 1px solid var(--border);
+        max-height: 500px;
+        overflow-y: auto;
       }
       table {
-        border-collapse: collapse;
         width: 100%;
-        background: var(--card);
-        font-size: 12.5px;
+        border-collapse: collapse;
+        font-size: 13px;
       }
-      th {
-        background: var(--blue);
-        color: #fff;
+      thead th {
+        background: #f7f9fc;
+        position: sticky;
+        top: 0;
+        z-index: 5;
         padding: 9px 12px;
         text-align: left;
-        font-weight: 600;
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--navy);
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        border-bottom: 2px solid var(--border);
+      }
+      tbody tr {
+        border-bottom: 1px solid #eef1f6;
+        transition: background 0.1s;
+      }
+      tbody tr:hover {
+        background: #f0f5ff;
+      }
+      tbody td {
+        padding: 9px 12px;
+        vertical-align: middle;
+      }
+      .badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 11px;
+        font-weight: 700;
         white-space: nowrap;
+      }
+      .badge-ready {
+        background: #c6f6d5;
+        color: #276749;
+      }
+      .badge-likely {
+        background: #bee3f8;
+        color: #2a69ac;
+      }
+      .badge-discovery {
+        background: #fed7aa;
+        color: #9c4221;
+      }
+      .badge-insufficient {
+        background: #fed7d7;
+        color: #9b2335;
+      }
+      .badge-high {
+        background: var(--green-lt);
+        color: var(--green);
+      }
+      .badge-medium {
+        background: var(--amber-lt);
+        color: var(--amber);
+      }
+      .badge-low {
+        background: var(--red-lt);
+        color: var(--red);
+      }
+      .badge-running {
+        background: #c6f6d5;
+        color: #276749;
+      }
+      .badge-stopped {
+        background: #fed7d7;
+        color: #9b2335;
+      }
+      .badge-vmss {
+        background: var(--azure-lt);
+        color: var(--navy);
+      }
+      .badge-avset {
+        background: var(--purple-lt);
+        color: var(--purple);
+      }
+      .badge-none {
+        background: #f0f0f0;
+        color: #555;
+      }
+
+      /* Progress bars */
+      .pbar-wrap {
+        width: 100%;
+        background: #e8eef5;
+        border-radius: 4px;
+        height: 7px;
+        overflow: hidden;
+      }
+      .pbar {
+        height: 100%;
+        border-radius: 4px;
+        background: var(--azure);
+        transition: width 0.3s;
+      }
+      .pbar.green {
+        background: #38a169;
+      }
+      .pbar.amber {
+        background: #d97706;
+      }
+      .pbar.red {
+        background: #e53e3e;
+      }
+
+      /* Filters */
+      .filters {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        align-items: center;
+        margin-bottom: 14px;
+      }
+      .filters label {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--muted);
+      }
+      .filters select,
+      .filters input {
+        padding: 6px 10px;
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        font-size: 13px;
+        background: #fff;
+        color: var(--text);
+        outline: none;
+      }
+      .filters select:focus,
+      .filters input:focus {
+        border-color: var(--azure);
+      }
+
+      /* Meter cell */
+      .meter-cell {
+        min-width: 90px;
+      }
+
+      /* Empty state */
+      .empty-state {
+        padding: 48px;
+        text-align: center;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      /* Category colors */
+      .cat-rightsize {
+        color: #2a69ac;
+        font-weight: 600;
+      }
+      .cat-swap {
+        color: #276749;
+        font-weight: 600;
+      }
+      .cat-decom {
+        color: #9b2335;
+        font-weight: 600;
+      }
+      .cat-cleanup {
+        color: #7b341e;
+        font-weight: 600;
+      }
+      .cat-quota {
+        color: #553c9a;
+        font-weight: 600;
+      }
+      .cat-crr {
+        color: #065666;
+        font-weight: 600;
+      }
+
+      /* Collection info */
+      .info-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 14px;
+        margin-bottom: 20px;
+      }
+      .info-card {
+        background: var(--card);
+        border-radius: 8px;
+        padding: 16px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+      }
+      .info-card dt {
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        margin-bottom: 4px;
+      }
+      .info-card dd {
+        font-size: 14px;
+        color: var(--text);
+        word-break: break-all;
+      }
+
+      /* ── Dark / Light / System theme ──────────────────── */
+      html[data-theme="dark"] {
+        --bg: #0f1923;
+        --card: #1a2535;
+        --border: #2a3a4d;
+        --text: #e2eaf4;
+        --muted: #7a8fa8;
+      }
+      html[data-theme="dark"] #sidebar {
+        background: #0d1925;
+      }
+      html[data-theme="dark"] #topbar {
+        background: #1a2535;
+        border-bottom-color: #2a3a4d;
+      }
+      html[data-theme="dark"] thead th {
+        background: #1e2f42;
+        color: #cdd8e8;
+      }
+      html[data-theme="dark"] tbody tr:hover {
+        background: #1e3050;
+      }
+      html[data-theme="dark"] .filters select,
+      html[data-theme="dark"] .filters input {
+        background: #1a2535;
+        color: #e2eaf4;
+        border-color: #2a3a4d;
+      }
+      html[data-theme="dark"] #reload-btn {
+        background: #2e75b6;
+      }
+
+      /* Sortable column headers */
+      thead th.sortable-col {
         cursor: pointer;
         user-select: none;
       }
-      th:hover {
-        background: var(--blue-lt);
+      thead th.sortable-col:hover {
+        background: #e4ecf7;
       }
-      td {
-        padding: 8px 12px;
-        border-bottom: 1px solid var(--border);
-        white-space: nowrap;
-      }
-      tr:hover td {
-        background: #eef4fb;
-      }
-      tr.csa-row td {
-        background: #f0f8ff;
+      html[data-theme="dark"] thead th.sortable-col:hover {
+        background: #253650;
       }
 
-      /* Pills */
-      .pill {
-        display: inline-block;
-        border-radius: 12px;
-        padding: 2px 9px;
-        font-size: 11px;
-        font-weight: 600;
-      }
-      .pill-green {
-        background: #c6efce;
-        color: var(--green);
-      }
-      .pill-yellow {
-        background: #ffeb9c;
-        color: var(--yellow);
-      }
-      .pill-red {
-        background: #ffc7ce;
-        color: var(--red);
-      }
-      .pill-blue {
-        background: #bdd7ee;
-        color: var(--blue);
-      }
-      .pill-gray {
-        background: #e2e8f0;
-        color: #475569;
-      }
-
-      /* Chart */
-      .chart-card {
-        background: var(--card);
+      /* Theme toggle button */
+      #theme-toggle {
+        padding: 5px 10px;
+        background: transparent;
         border: 1px solid var(--border);
-        border-radius: 8px;
-        padding: 20px;
-        margin-bottom: 20px;
-      }
-      .chart-title {
-        font-size: 14px;
-        font-weight: 600;
-        margin-bottom: 16px;
-      }
-
-      /* Loading / empty */
-      .empty {
-        padding: 40px;
-        text-align: center;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 12px;
         color: var(--muted);
       }
-      .loading {
-        opacity: 0.5;
-        pointer-events: none;
+      #theme-toggle:hover {
+        border-color: var(--azure);
+        color: var(--azure);
       }
 
-      /* Section */
-      section {
-        display: none;
+      /* Connection status */
+      #conn-status {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        font-size: 12px;
+        color: var(--muted);
       }
-      section.active {
-        display: block;
+      #conn-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #38a169;
+        flex-shrink: 0;
+      }
+      #conn-dot.offline {
+        background: #e53e3e;
       }
 
-      /* Metadata table */
-      .meta-table {
-        border-collapse: collapse;
-        width: 100%;
-        max-width: 600px;
-      }
-      .meta-table td {
-        padding: 6px 12px;
-        border-bottom: 1px solid var(--border);
+      /* Info / error banners */
+      .info-banner {
+        padding: 14px 18px;
+        background: #ebf8ff;
+        border: 1px solid #bee3f8;
+        border-radius: 6px;
+        color: #2a69ac;
         font-size: 13px;
+        margin-bottom: 14px;
       }
-      .meta-table td:first-child {
-        font-weight: 600;
-        width: 240px;
-        color: var(--muted);
+      html[data-theme="dark"] .info-banner {
+        background: #1a2e45;
+        border-color: #2a4a6a;
+        color: #90cdf4;
+      }
+      .error-banner {
+        padding: 14px 18px;
+        background: #fff5f5;
+        border: 1px solid #fbb;
+        border-radius: 6px;
+        color: #c53030;
+        font-size: 13px;
+        margin-bottom: 14px;
+      }
+      html[data-theme="dark"] .error-banner {
+        background: #3d1515;
+        border-color: #7a2020;
+        color: #fc8181;
       }
     </style>
   </head>
   <body>
-    <div id="app">
-      <nav>
-        <div class="nav-logo">Azure CLOUDOPT<span>Collector</span></div>
-        <div class="nav-section">Overview</div>
-        <a href="#" data-section="dashboard" class="active">Dashboard</a>
-        <a href="#" data-section="subscriptions">Subscriptions</a>
-        <a href="#" data-section="resource-groups">Resource Groups</a>
-        <a href="#" data-section="groups">VM Groups</a>
-        <div class="nav-section">Detail</div>
-        <a href="#" data-section="inventory">VM Inventory</a>
-        <a href="#" data-section="recommendations">Recommendations</a>
-        <a href="#" data-section="quota">Quota Utilisation</a>
-        <div class="nav-section">Info</div>
-        <a href="#" data-section="metadata">Collection Info</a>
-      </nav>
+    <!-- Sidebar -->
+    <nav id="sidebar">
+      <div id="sidebar-header">
+        <div class="logo">Cloud Efficiency Optimization</div>
+        <div class="sub">Azure CloudOpt</div>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">Overview</div>
+        <div
+          class="nav-item active"
+          data-section="s-dashboard"
+          onclick="nav(this)"
+        >
+          <span class="nav-icon">&#x1F4CA;</span>Summary Dashboard
+        </div>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">Optimization</div>
+        <div class="nav-item" data-section="s-findings" onclick="nav(this)">
+          <span class="nav-icon">&#x1F3AF;</span>Decisions &amp; Findings
+        </div>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">Fleet</div>
+        <div class="nav-item" data-section="s-subs" onclick="nav(this)">
+          <span class="nav-icon">&#x1F5C2;&#xFE0F;</span>Subscriptions
+        </div>
+        <div class="nav-item" data-section="s-rg" onclick="nav(this)">
+          <span class="nav-icon">&#x1F4C1;</span>Resource Groups
+        </div>
+        <div class="nav-item" data-section="s-groups" onclick="nav(this)">
+          <span class="nav-icon">&#x2699;&#xFE0F;</span>VM Groups
+        </div>
+        <div class="nav-item" data-section="s-perfvm" onclick="nav(this)">
+          <span class="nav-icon">&#x1F4C8;</span>Perf by VM
+        </div>
+        <div class="nav-item" data-section="s-inventory" onclick="nav(this)">
+          <span class="nav-icon">&#x1F5A5;&#xFE0F;</span>VM Inventory
+        </div>
+        <div class="nav-item" data-section="s-sku" onclick="nav(this)">
+          <span class="nav-icon">&#x1F4D0;</span>SKU Analysis
+        </div>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">Infrastructure</div>
+        <div class="nav-item" data-section="s-quota" onclick="nav(this)">
+          <span class="nav-icon">&#x1F4CF;</span>Quota Utilization
+        </div>
+        <div class="nav-item" data-section="s-insights" onclick="nav(this)">
+          <span class="nav-icon">&#x1F9EC;</span>VM Insights
+        </div>
+        <div class="nav-item" data-section="s-crg" onclick="nav(this)">
+          <span class="nav-icon">&#x1F512;</span>Capacity Reservations
+        </div>
+        <div class="nav-item" data-section="s-depfail" onclick="nav(this)">
+          <span class="nav-icon">&#x26A0;&#xFE0F;</span>Deployment Failures
+        </div>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">Info</div>
+        <div class="nav-item" data-section="s-collection" onclick="nav(this)">
+          <span class="nav-icon">&#x2139;&#xFE0F;</span>Collection Info
+        </div>
+      </div>
+    </nav>
 
-      <main id="main-content">
+    <!-- Main -->
+    <div id="main">
+      <div id="topbar">
+        <h1 id="topbar-title">Summary Dashboard</h1>
+        <div id="topbar-meta">
+          <div id="conn-status">
+            <div id="conn-dot"></div>
+            <span id="conn-label">Live</span>
+          </div>
+          <span id="meta-date"></span>
+          <span id="meta-version"></span>
+          <button id="theme-toggle" onclick="toggleTheme()">
+            &#x2609; System
+          </button>
+          <button id="reload-btn" onclick="reloadData()">
+            &#x21BA; Reload
+          </button>
+        </div>
+      </div>
+      <div id="content">
         <!-- DASHBOARD -->
-        <section id="dashboard" class="active">
-          <div class="toolbar">
-            <h1>Dashboard</h1>
-            <button class="reload" onclick="reloadData()">↺ Reload Data</button>
+        <div id="s-dashboard" class="section active">
+          <div class="kpi-grid">
+            <div class="kpi-card">
+              <div class="kpi-label">Total VMs</div>
+              <div class="kpi-value" id="kpi-total">&#x2014;</div>
+            </div>
+            <div class="kpi-card green">
+              <div class="kpi-label">Running</div>
+              <div class="kpi-value" id="kpi-running">&#x2014;</div>
+            </div>
+            <div class="kpi-card amber">
+              <div class="kpi-label">Stopped / Deallocated</div>
+              <div class="kpi-value" id="kpi-stopped">&#x2014;</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Total Findings</div>
+              <div class="kpi-value" id="kpi-findings">&#x2014;</div>
+            </div>
+            <div class="kpi-card green">
+              <div class="kpi-label">READY Actions</div>
+              <div class="kpi-value" id="kpi-ready">&#x2014;</div>
+              <div class="kpi-sub">High-confidence, act now</div>
+            </div>
+            <div class="kpi-card amber">
+              <div class="kpi-label">LIKELY Actions</div>
+              <div class="kpi-value" id="kpi-likely">&#x2014;</div>
+              <div class="kpi-sub">Probably safe to act</div>
+            </div>
+            <div class="kpi-card purple">
+              <div class="kpi-label">DISCOVERY</div>
+              <div class="kpi-value" id="kpi-discovery">&#x2014;</div>
+              <div class="kpi-sub">Needs investigation</div>
+            </div>
+            <div class="kpi-card red">
+              <div class="kpi-label">Quota Alerts</div>
+              <div class="kpi-value" id="kpi-quota">&#x2014;</div>
+            </div>
           </div>
-          <div class="cards" id="summary-cards"></div>
-          <div class="chart-card">
-            <div class="chart-title">CPU Utilisation by Subscription</div>
-            <canvas id="sub-chart" height="80"></canvas>
+          <div class="chart-row wide">
+            <div class="chart-card">
+              <h3>Findings by Category &amp; Readiness</h3>
+              <canvas id="chart-category"></canvas>
+            </div>
+            <div class="chart-card">
+              <h3>Confidence Distribution</h3>
+              <canvas id="chart-confidence"></canvas>
+            </div>
           </div>
-          <div class="chart-card">
-            <div class="chart-title">Recommendation Categories</div>
-            <canvas id="rec-chart" height="80"></canvas>
+          <div class="table-card">
+            <div class="table-header">
+              <h3>Top READY Decisions</h3>
+              <span
+                id="top-ready-count"
+                style="font-size: 12px; color: var(--muted)"
+              ></span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Code</th>
+                    <th>Category</th>
+                    <th>Resource</th>
+                    <th>Current</th>
+                    <th>Proposed</th>
+                    <th>Rationale</th>
+                    <th>Confidence</th>
+                  </tr>
+                </thead>
+                <tbody id="top-ready-body"></tbody>
+              </table>
+            </div>
           </div>
-        </section>
+        </div>
+
+        <!-- DECISIONS -->
+        <div id="s-findings" class="section">
+          <div class="filters">
+            <label>Type</label>
+            <select id="f-type" onchange="renderFindings()">
+              <option value="">All</option>
+              <option value="RECOMMENDATION">Recommendation</option>
+              <option value="CANDIDATE">Candidate</option>
+            </select>
+            <label>Category</label>
+            <select id="f-cat" onchange="renderFindings()">
+              <option value="">All</option>
+              <option value="rightsize">Rightsize</option>
+              <option value="swap">Swap</option>
+              <option value="decom">Decommission</option>
+              <option value="cleanup">Cleanup</option>
+              <option value="quota">Quota</option>
+              <option value="crr">CRR</option>
+            </select>
+            <label>Readiness</label>
+            <select id="f-readiness" onchange="renderFindings()">
+              <option value="">All</option>
+              <option value="READY">READY</option>
+              <option value="LIKELY">LIKELY</option>
+              <option value="DISCOVERY">DISCOVERY</option>
+              <option value="INSUFFICIENT">INSUFFICIENT</option>
+            </select>
+            <label>Confidence</label>
+            <select id="f-confidence" onchange="renderFindings()">
+              <option value="">All</option>
+              <option value="HIGH">HIGH</option>
+              <option value="MEDIUM">MEDIUM</option>
+              <option value="LOW">LOW</option>
+            </select>
+            <input
+              id="f-search"
+              type="text"
+              placeholder="Search resource / code&#x2026;"
+              oninput="renderFindings()"
+              style="min-width: 200px"
+            />
+          </div>
+          <div class="table-card">
+            <div class="table-header">
+              <h3>Decisions &amp; Findings</h3>
+              <span
+                id="findings-count"
+                style="font-size: 12px; color: var(--muted)"
+              ></span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Code</th>
+                    <th>Type</th>
+                    <th>Category</th>
+                    <th>Readiness</th>
+                    <th>Confidence</th>
+                    <th>Resource</th>
+                    <th>Current</th>
+                    <th>Proposed</th>
+                    <th>Rationale</th>
+                  </tr>
+                </thead>
+                <tbody id="findings-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
 
         <!-- SUBSCRIPTIONS -->
-        <section id="subscriptions">
-          <div class="toolbar"><h1>Subscriptions</h1></div>
-          <div class="table-wrap">
-            <table id="subs-table">
-              <thead>
-                <tr>
-                  <th>Subscription</th>
-                  <th>VM SKU</th>
-                  <th onclick="sortTable('subs-table', 2)">VM Count ↕</th>
-                  <th onclick="sortTable('subs-table', 3)">Avg CPU % ↕</th>
-                  <th onclick="sortTable('subs-table', 4)">Avg Mem % ↕</th>
-                </tr>
-              </thead>
-              <tbody id="subs-body"></tbody>
-            </table>
+        <div id="s-subs" class="section">
+          <div class="chart-row" style="grid-template-columns: 1fr">
+            <div class="chart-card">
+              <h3>VMs per Subscription</h3>
+              <canvas id="chart-subs" style="max-height: 200px"></canvas>
+            </div>
           </div>
-        </section>
+          <div class="table-card">
+            <div class="table-header"><h3>By Subscription</h3></div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Subscription</th>
+                    <th>VMs</th>
+                    <th>Running</th>
+                    <th>Stopped</th>
+                    <th>Avg CPU %</th>
+                    <th>Avg Mem %</th>
+                    <th>Findings</th>
+                    <th>READY</th>
+                    <th>Top SKUs</th>
+                  </tr>
+                </thead>
+                <tbody id="subs-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
 
         <!-- RESOURCE GROUPS -->
-        <section id="resource-groups">
-          <div class="toolbar"><h1>Resource Groups</h1></div>
-          <div class="table-wrap">
-            <table id="rg-table">
-              <thead>
-                <tr>
-                  <th>Subscription</th>
-                  <th>Resource Group</th>
-                  <th>VM SKU</th>
-                  <th onclick="sortTable('rg-table', 3)">VM Count ↕</th>
-                  <th onclick="sortTable('rg-table', 4)">Avg CPU % ↕</th>
-                  <th onclick="sortTable('rg-table', 5)">Avg Mem % ↕</th>
-                </tr>
-              </thead>
-              <tbody id="rg-body"></tbody>
-            </table>
+        <div id="s-rg" class="section">
+          <div class="filters">
+            <label>Subscription</label>
+            <select id="rg-sub-filter" onchange="renderRg()">
+              <option value="">All</option>
+            </select>
+            <input
+              id="rg-search"
+              type="text"
+              placeholder="Search RG&#x2026;"
+              oninput="renderRg()"
+              style="min-width: 160px"
+            />
           </div>
-        </section>
+          <div class="table-card">
+            <div class="table-header">
+              <h3>By Resource Group</h3>
+              <span
+                id="rg-count"
+                style="font-size: 12px; color: var(--muted)"
+              ></span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Subscription</th>
+                    <th>Resource Group</th>
+                    <th>VMs</th>
+                    <th>Running</th>
+                    <th>Stopped</th>
+                    <th>Avg CPU %</th>
+                    <th>Avg Mem %</th>
+                    <th>Findings</th>
+                    <th>READY</th>
+                  </tr>
+                </thead>
+                <tbody id="rg-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
 
         <!-- VM GROUPS -->
-        <section id="groups">
-          <div class="toolbar">
-            <h1>VM Groups</h1>
-            <small style="color: var(--muted)"
-              >VMSS, Availability Sets, and ungrouped VMs</small
-            >
-          </div>
+        <div id="s-groups" class="section">
           <div class="filters">
-            <select id="group-type-filter" onchange="renderGroups()">
-              <option value="">All group types</option>
+            <label>Type</label>
+            <select id="grp-type-filter" onchange="renderGroups()">
+              <option value="">All</option>
               <option value="VMSS">VMSS</option>
               <option value="AvailabilitySet">Availability Set</option>
               <option value="None">Ungrouped</option>
             </select>
-          </div>
-          <div class="table-wrap">
-            <table id="groups-table">
-              <thead>
-                <tr>
-                  <th>Subscription</th>
-                  <th>Resource Group</th>
-                  <th>Group Name</th>
-                  <th>Type</th>
-                  <th>VM SKU</th>
-                  <th onclick="sortTable('groups-table', 5)">VM Count ↕</th>
-                  <th onclick="sortTable('groups-table', 6)">Avg CPU % ↕</th>
-                  <th onclick="sortTable('groups-table', 7)">Avg Mem % ↕</th>
-                </tr>
-              </thead>
-              <tbody id="groups-body"></tbody>
-            </table>
-          </div>
-        </section>
-
-        <!-- INVENTORY -->
-        <section id="inventory">
-          <div class="toolbar"><h1>VM Inventory</h1></div>
-          <div class="filters">
             <input
-              id="inv-search"
-              placeholder="Search VM, RG, SKU…"
-              oninput="renderInventory()"
-              style="width: 220px"
+              id="grp-search"
+              type="text"
+              placeholder="Search group&#x2026;"
+              oninput="renderGroups()"
+              style="min-width: 160px"
             />
+          </div>
+          <div class="table-card">
+            <div class="table-header">
+              <h3>VM Groups</h3>
+              <span
+                id="grp-count"
+                style="font-size: 12px; color: var(--muted)"
+              ></span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Subscription</th>
+                    <th>Resource Group</th>
+                    <th>Group Name</th>
+                    <th>Type</th>
+                    <th>SKU</th>
+                    <th>VMs</th>
+                    <th>Avg CPU %</th>
+                    <th>Avg Mem %</th>
+                    <th>Findings</th>
+                    <th>READY</th>
+                  </tr>
+                </thead>
+                <tbody id="grp-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- VM INVENTORY -->
+        <div id="s-inventory" class="section">
+          <div class="filters">
             <select id="inv-sub" onchange="renderInventory()">
-              <option value="">All subscriptions</option>
+              <option value="">All Subscriptions</option>
             </select>
             <select id="inv-rg" onchange="renderInventory()">
-              <option value="">All resource groups</option>
+              <option value="">All Resource Groups</option>
             </select>
             <select id="inv-sku" onchange="renderInventory()">
               <option value="">All SKUs</option>
             </select>
-          </div>
-          <div class="table-wrap" style="max-height: 65vh; overflow-y: auto">
-            <table id="inv-table">
-              <thead>
-                <tr>
-                  <th>VM Name</th>
-                  <th>Subscription</th>
-                  <th>Resource Group</th>
-                  <th>SKU</th>
-                  <th>vCPUs</th>
-                  <th>Mem (GB)</th>
-                  <th>Region</th>
-                  <th>OS</th>
-                  <th>OS Version</th>
-                  <th>Power</th>
-                  <th>Image Publisher</th>
-                  <th>Image Offer</th>
-                  <th>Image SKU</th>
-                  <th>Image Ver.</th>
-                  <th>AZ</th>
-                  <th>VMSS</th>
-                  <th>AvSet</th>
-                  <th class="csa-col" style="background: #2e75b6">Workload</th>
-                  <th class="csa-col" style="background: #2e75b6">
-                    Application
-                  </th>
-                  <th class="csa-col" style="background: #2e75b6">
-                    Environment
-                  </th>
-                  <th class="csa-col" style="background: #2e75b6">
-                    Criticality
-                  </th>
-                  <th class="csa-col" style="background: #2e75b6">Owner</th>
-                </tr>
-              </thead>
-              <tbody id="inv-body"></tbody>
-            </table>
-          </div>
-          <div
-            id="inv-count"
-            style="margin-top: 8px; color: var(--muted); font-size: 12px"
-          ></div>
-        </section>
-
-        <!-- RECOMMENDATIONS -->
-        <section id="recommendations">
-          <div class="toolbar"><h1>Recommendations</h1></div>
-          <div class="filters">
-            <select id="rec-cat" onchange="renderRecommendations()">
-              <option value="">All categories</option>
-              <option value="underutilized">Underutilized</option>
-              <option value="right-size">Right-size</option>
-              <option value="PaaS-candidate">PaaS Candidate</option>
+            <select id="inv-state" onchange="renderInventory()">
+              <option value="">All States</option>
+              <option value="running">Running</option>
+              <option value="stopped">Stopped / Deallocated</option>
             </select>
-            <select id="rec-override" onchange="renderRecommendations()">
-              <option value="">All override status</option>
-              <option value="accept">Accepted</option>
-              <option value="reject">Rejected</option>
-              <option value="defer">Deferred</option>
-              <option value="">Pending</option>
-            </select>
+            <input
+              id="inv-search"
+              type="text"
+              placeholder="Search VM / RG&#x2026;"
+              oninput="renderInventory()"
+              style="min-width: 180px"
+            />
           </div>
-          <div class="table-wrap">
-            <table id="rec-table">
-              <thead>
-                <tr>
-                  <th>Resource ID</th>
-                  <th>Current SKU</th>
-                  <th>Recommended SKU</th>
-                  <th>Category</th>
-                  <th>Recommended Action</th>
-                  <th>Est. Savings</th>
-                  <th>Override</th>
-                  <th>Notes</th>
-                </tr>
-              </thead>
-              <tbody id="rec-body"></tbody>
-            </table>
+          <div class="table-card">
+            <div class="table-header">
+              <h3>VM Inventory</h3>
+              <span
+                id="inv-count"
+                style="font-size: 12px; color: var(--muted)"
+              ></span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>VM Name</th>
+                    <th>Subscription</th>
+                    <th>Resource Group</th>
+                    <th>SKU</th>
+                    <th>vCPUs</th>
+                    <th>RAM (GB)</th>
+                    <th>Region</th>
+                    <th>OS</th>
+                    <th>State</th>
+                    <th>VMSS</th>
+                    <th>Av. Set</th>
+                    <th>Zone</th>
+                    <th style="background: var(--azure-lt)">Workload</th>
+                    <th style="background: var(--azure-lt)">Application</th>
+                    <th style="background: var(--azure-lt)">Environment</th>
+                    <th style="background: var(--azure-lt)">Criticality</th>
+                    <th style="background: var(--azure-lt)">Owner</th>
+                  </tr>
+                </thead>
+                <tbody id="inv-body"></tbody>
+              </table>
+            </div>
+            <div
+              id="inv-page-info"
+              style="
+                padding: 8px 16px;
+                font-size: 12px;
+                color: var(--muted);
+                border-top: 1px solid var(--border);
+              "
+            ></div>
           </div>
-        </section>
+        </div>
 
-        <!-- METADATA -->
-        <section id="metadata">
-          <div class="toolbar"><h1>Collection Info</h1></div>
-          <div class="card" style="max-width: 620px">
-            <table class="meta-table" id="meta-table"></table>
+        <!-- SKU ANALYSIS -->
+        <div id="s-sku" class="section">
+          <div class="chart-row" style="grid-template-columns: 1fr">
+            <div class="chart-card">
+              <h3>Top 15 SKUs by Count</h3>
+              <canvas id="chart-sku" style="max-height: 220px"></canvas>
+            </div>
           </div>
-        </section>
+          <div class="table-card">
+            <div class="table-header"><h3>SKU Distribution</h3></div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>SKU</th>
+                    <th>vCPUs</th>
+                    <th>RAM (GB)</th>
+                    <th>Count</th>
+                    <th>Running</th>
+                    <th>Stopped</th>
+                    <th>Avg CPU %</th>
+                    <th>Avg Mem %</th>
+                  </tr>
+                </thead>
+                <tbody id="sku-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
 
         <!-- QUOTA -->
-        <section id="quota">
-          <div class="toolbar"><h1>Quota Utilisation</h1></div>
+        <div id="s-quota" class="section">
           <div class="filters">
             <label
-              style="
-                font-size: 13px;
-                display: flex;
-                align-items: center;
-                gap: 6px;
-              "
-            >
-              <input
+              ><input
                 type="checkbox"
-                id="quota-alerts-only"
+                id="quota-alert-only"
                 onchange="renderQuota()"
               />
-              Alerts only
-            </label>
+              Alert only (&ge;80%)</label
+            >
+            <input
+              id="quota-search"
+              type="text"
+              placeholder="Search&#x2026;"
+              oninput="renderQuota()"
+              style="min-width: 160px"
+            />
           </div>
-          <div class="table-wrap">
-            <table id="quota-table">
-              <thead>
-                <tr>
-                  <th>Subscription</th>
-                  <th>Region</th>
-                  <th>Resource Type</th>
-                  <th>Display Name</th>
-                  <th onclick="sortTable('quota-table', 4)">Current ↕</th>
-                  <th onclick="sortTable('quota-table', 5)">Limit ↕</th>
-                  <th onclick="sortTable('quota-table', 6)">Utilization % ↕</th>
-                  <th>Alert</th>
-                </tr>
-              </thead>
-              <tbody id="quota-body"></tbody>
-            </table>
+          <div class="table-card">
+            <div class="table-header">
+              <h3>Quota Utilization</h3>
+              <span
+                id="quota-count"
+                style="font-size: 12px; color: var(--muted)"
+              ></span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Subscription</th>
+                    <th>Region</th>
+                    <th>Resource</th>
+                    <th>Display Name</th>
+                    <th>Used</th>
+                    <th>Limit</th>
+                    <th>Utilization</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="quota-body"></tbody>
+              </table>
+            </div>
           </div>
-          <div
-            id="quota-count"
-            style="margin-top: 8px; color: var(--muted); font-size: 12px"
-          ></div>
-        </section>
-      </main>
+        </div>
+
+        <!-- CAPACITY RESERVATIONS -->
+        <div id="s-crg" class="section">
+          <div class="table-card">
+            <div class="table-header">
+              <h3>Capacity Reservation Groups</h3>
+              <span
+                id="crg-count"
+                style="font-size: 12px; color: var(--muted)"
+              ></span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Group Name</th>
+                    <th>Subscription</th>
+                    <th>Region</th>
+                    <th>Zones</th>
+                    <th>Reserved</th>
+                    <th>Used</th>
+                    <th>Fill Rate %</th>
+                  </tr>
+                </thead>
+                <tbody id="crg-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- DEPLOYMENT FAILURES -->
+        <div id="s-depfail" class="section">
+          <div class="filters">
+            <select id="depfail-class" onchange="renderDepFail()">
+              <option value="">All Error Classes</option>
+            </select>
+            <input
+              id="depfail-search"
+              type="text"
+              placeholder="Search resource / RG&#x2026;"
+              oninput="renderDepFail()"
+              style="min-width: 180px"
+            />
+          </div>
+          <div class="table-card">
+            <div class="table-header">
+              <h3>Deployment Failures</h3>
+              <span
+                id="depfail-count"
+                style="font-size: 12px; color: var(--muted)"
+              ></span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Resource Name</th>
+                    <th>Type</th>
+                    <th>Resource Group</th>
+                    <th>Subscription</th>
+                    <th>Error Class</th>
+                    <th>Operation</th>
+                    <th>Timestamp</th>
+                  </tr>
+                </thead>
+                <tbody id="depfail-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- PERF BY VM -->
+        <div id="s-perfvm" class="section">
+          <div class="filters">
+            <select id="pvm-sub" onchange="renderPerfVm()">
+              <option value="">All Subscriptions</option>
+            </select>
+            <select id="pvm-rg" onchange="renderPerfVm()">
+              <option value="">All Resource Groups</option>
+            </select>
+            <input
+              id="pvm-search"
+              type="text"
+              placeholder="Search VM / RG&#x2026;"
+              oninput="renderPerfVm()"
+              style="min-width: 180px"
+            />
+          </div>
+          <div class="table-card">
+            <div class="table-header">
+              <h3>Performance by VM</h3>
+              <span
+                id="pvm-count"
+                style="font-size: 12px; color: var(--muted)"
+              ></span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>VM Name</th>
+                    <th>Subscription</th>
+                    <th>Resource Group</th>
+                    <th>Region</th>
+                    <th>Zone</th>
+                    <th>VM SKU</th>
+                    <th>vCPUs</th>
+                    <th>Mem (GB)</th>
+                    <th>State</th>
+                    <th>AvSet / VMSS</th>
+                    <th>Avg CPU %</th>
+                    <th>P95 CPU %</th>
+                    <th>Avg Mem %</th>
+                    <th>Findings</th>
+                    <th>READY</th>
+                  </tr>
+                </thead>
+                <tbody id="pvm-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- VM INSIGHTS -->
+        <div id="s-insights" class="section">
+          <div class="filters">
+            <select id="ins-sub" onchange="renderVmInsights()">
+              <option value="">All Subscriptions</option>
+            </select>
+            <input
+              id="ins-search"
+              type="text"
+              placeholder="Search VM / RG&#x2026;"
+              oninput="renderVmInsights()"
+              style="min-width: 180px"
+            />
+          </div>
+          <div id="ins-banner"></div>
+          <div class="table-card">
+            <div class="table-header">
+              <h3>VM Insights &mdash; Platform Metrics</h3>
+              <span
+                id="ins-count"
+                style="font-size: 12px; color: var(--muted)"
+              ></span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>VM Name</th>
+                    <th>Subscription</th>
+                    <th>Resource Group</th>
+                    <th>VM SKU</th>
+                    <th>Avg CPU %</th>
+                    <th>P95 CPU %</th>
+                    <th>Avg Mem %</th>
+                    <th>Disk Read MBps</th>
+                    <th>Disk Write MBps</th>
+                    <th>Net In MBps</th>
+                    <th>Net Out MBps</th>
+                  </tr>
+                </thead>
+                <tbody id="ins-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- COLLECTION INFO -->
+        <div id="s-collection" class="section">
+          <div class="info-grid" id="info-grid"></div>
+          <div class="table-card" id="info-subs-card" style="display: none">
+            <div class="table-header"><h3>Subscriptions Scanned</h3></div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Subscription</th>
+                  </tr>
+                </thead>
+                <tbody id="info-subs-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <script>
-      // ---------------------------------------------------------------------------
-      // State
-      // ---------------------------------------------------------------------------
-      let vms = [],
-        recs = [],
-        subSummary = [],
-        rgSummary = [],
-        groupSummary = [],
-        quota = [],
-        meta = {};
-      let subChart, recChart;
+      // ── State ──────────────────────────────────────────
+      var vms = [],
+        findings = [],
+        subData = [],
+        rgData = [],
+        groupData = [],
+        skuData = [];
+      var quota = [],
+        crg = [],
+        depFail = [];
+      var overview = {};
+      var meta = {};
+      var perVmData = [],
+        vmInsightsData = [];
+      var chartCategory, chartConfidence, chartSubs, chartSku;
+      var PAGE_SIZE = 500,
+        invPage = 0;
+      var THEME_MODES = ["system", "light", "dark"];
+      var THEME_ICONS = { system: "\u2609", light: "\u2600", dark: "\u263e" };
+      var themeIdx = 0;
 
-      // ---------------------------------------------------------------------------
-      // Bootstrap
-      // ---------------------------------------------------------------------------
-      document.addEventListener("DOMContentLoaded", async () => {
-        setupNav();
-        await loadAll();
-      });
+      // ── Helpers ────────────────────────────────────────
+      function fmtNum(v) {
+        return v == null ? "\u2014" : v.toLocaleString();
+      }
+      function fmtPct(v) {
+        return v == null ? "\u2014" : v.toFixed(1) + "%";
+      }
+      function esc(s) {
+        return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+          return {
+            "&": "&amp;",
+            "<": "&lt;",
+            ">": "&gt;",
+            '"': "&quot;",
+            "'": "&#39;",
+          }[c];
+        });
+      }
 
+      function pbarHtml(pct) {
+        if (pct == null) return "\u2014";
+        var cls = pct >= 90 ? "red" : pct >= 75 ? "amber" : "green";
+        return (
+          '<div class="meter-cell"><div class="pbar-wrap"><div class="pbar ' +
+          cls +
+          '" style="width:' +
+          Math.min(100, pct) +
+          '%"></div></div><small>' +
+          pct.toFixed(1) +
+          "%</small></div>"
+        );
+      }
+
+      function badgeReadiness(r) {
+        var m = {
+          READY: "badge-ready",
+          LIKELY: "badge-likely",
+          DISCOVERY: "badge-discovery",
+          INSUFFICIENT: "badge-insufficient",
+        };
+        return '<span class="badge ' + (m[r] || "") + '">' + esc(r) + "</span>";
+      }
+      function badgeConfidence(c) {
+        if (!c)
+          return '<span style="color:var(--muted);font-size:11px">\u2014</span>';
+        var m = {
+          HIGH: "badge-high",
+          MEDIUM: "badge-medium",
+          LOW: "badge-low",
+        };
+        return '<span class="badge ' + (m[c] || "") + '">' + esc(c) + "</span>";
+      }
+      function badgeCat(c) {
+        var labels = {
+          rightsize: "Rightsize",
+          swap: "Swap",
+          decom: "Decommission",
+          cleanup: "Cleanup",
+          quota: "Quota",
+          crr: "CRR",
+        };
+        return (
+          '<span class="cat-' +
+          (c || "").toLowerCase() +
+          '">' +
+          (labels[c] || esc(c)) +
+          "</span>"
+        );
+      }
+      function badgeState(state) {
+        var s = (state || "").toLowerCase();
+        if (s.indexOf("running") >= 0)
+          return '<span class="badge badge-running">Running</span>';
+        if (s.indexOf("stopped") >= 0 || s.indexOf("deallocated") >= 0)
+          return '<span class="badge badge-stopped">Stopped</span>';
+        return '<span class="badge">' + esc(state) + "</span>";
+      }
+      function fillRate(pct) {
+        if (pct == null) return "\u2014";
+        var cls =
+          pct >= 80
+            ? "badge-ready"
+            : pct >= 60
+              ? "badge-likely"
+              : "badge-insufficient";
+        return '<span class="badge ' + cls + '">' + pct.toFixed(1) + "%</span>";
+      }
+      function tbody(id, html) {
+        var el = document.getElementById(id);
+        if (el)
+          el.innerHTML =
+            html ||
+            '<tr><td colspan="99" class="empty-state">No data.</td></tr>';
+      }
+
+      // ── Navigation ─────────────────────────────────────
+      var titles = {
+        "s-dashboard": "Summary Dashboard",
+        "s-findings": "Decisions & Findings",
+        "s-subs": "Subscriptions",
+        "s-rg": "Resource Groups",
+        "s-groups": "VM Groups",
+        "s-perfvm": "Perf by VM",
+        "s-inventory": "VM Inventory",
+        "s-sku": "SKU Analysis",
+        "s-quota": "Quota Utilization",
+        "s-insights": "VM Insights",
+        "s-crg": "Capacity Reservations",
+        "s-depfail": "Deployment Failures",
+        "s-collection": "Collection Info",
+      };
+
+      function nav(el) {
+        document.querySelectorAll(".nav-item").forEach(function (n) {
+          n.classList.remove("active");
+        });
+        document.querySelectorAll(".section").forEach(function (s) {
+          s.classList.remove("active");
+        });
+        el.classList.add("active");
+        var sid = el.dataset.section;
+        document.getElementById(sid).classList.add("active");
+        document.getElementById("topbar-title").textContent = titles[sid] || "";
+      }
+
+      // ── Data loading ───────────────────────────────────
       async function loadAll() {
-        [vms, recs, subSummary, rgSummary, groupSummary, quota, meta] =
-          await Promise.all([
-            fetchJSON("/api/inventory"),
-            fetchJSON("/api/recommendations"),
-            fetchJSON("/api/summary/subscription"),
-            fetchJSON("/api/summary/resource-group"),
-            fetchJSON("/api/summary/groups"),
-            fetchJSON("/api/quota"),
-            fetchJSON("/api/metadata"),
-          ]);
-        populateFilters();
+        var results = await Promise.all([
+          fetch("/api/summary/overview")
+            .then(function (r) {
+              return r.json();
+            })
+            .catch(function () {
+              return {};
+            }),
+          fetch("/api/summary/subscription")
+            .then(function (r) {
+              return r.json();
+            })
+            .catch(function () {
+              return [];
+            }),
+          fetch("/api/summary/resource-group")
+            .then(function (r) {
+              return r.json();
+            })
+            .catch(function () {
+              return [];
+            }),
+          fetch("/api/summary/groups")
+            .then(function (r) {
+              return r.json();
+            })
+            .catch(function () {
+              return [];
+            }),
+          fetch("/api/summary/sku")
+            .then(function (r) {
+              return r.json();
+            })
+            .catch(function () {
+              return [];
+            }),
+          fetch("/api/inventory")
+            .then(function (r) {
+              return r.json();
+            })
+            .catch(function () {
+              return [];
+            }),
+          fetch("/api/findings")
+            .then(function (r) {
+              return r.json();
+            })
+            .catch(function () {
+              return [];
+            }),
+          fetch("/api/quota")
+            .then(function (r) {
+              return r.json();
+            })
+            .catch(function () {
+              return [];
+            }),
+          fetch("/api/capacity-reservations")
+            .then(function (r) {
+              return r.json();
+            })
+            .catch(function () {
+              return [];
+            }),
+          fetch("/api/deployment-failures")
+            .then(function (r) {
+              return r.json();
+            })
+            .catch(function () {
+              return [];
+            }),
+          fetch("/api/metadata")
+            .then(function (r) {
+              return r.json();
+            })
+            .catch(function () {
+              return {};
+            }),
+          fetch("/api/summary/per-vm")
+            .then(function (r) {
+              return r.json();
+            })
+            .catch(function () {
+              return [];
+            }),
+          fetch("/api/vm-insights")
+            .then(function (r) {
+              return r.json();
+            })
+            .catch(function () {
+              return [];
+            }),
+        ]);
+        overview = results[0];
+        subData = results[1];
+        rgData = results[2];
+        groupData = results[3];
+        skuData = results[4];
+        vms = results[5];
+        findings = results[6];
+        quota = results[7];
+        crg = results[8];
+        depFail = results[9];
+        meta = results[10];
+        perVmData = results[11] || [];
+        vmInsightsData = results[12] || [];
         renderAll();
       }
 
       async function reloadData() {
-        await fetchJSON("/api/reload", "POST");
+        await fetch("/api/reload", { method: "POST" });
         await loadAll();
       }
 
-      // ---------------------------------------------------------------------------
-      // Navigation
-      // ---------------------------------------------------------------------------
-      function setupNav() {
-        document.querySelectorAll("nav a").forEach((a) => {
-          a.addEventListener("click", (e) => {
-            e.preventDefault();
-            const id = a.dataset.section;
-            document
-              .querySelectorAll("nav a")
-              .forEach((x) => x.classList.remove("active"));
-            document
-              .querySelectorAll("section")
-              .forEach((x) => x.classList.remove("active"));
-            a.classList.add("active");
-            document.getElementById(id).classList.add("active");
-          });
-        });
-      }
-
-      // ---------------------------------------------------------------------------
-      // Render all
-      // ---------------------------------------------------------------------------
       function renderAll() {
+        renderMeta();
         renderDashboard();
-        renderSubscriptions();
-        renderResourceGroups();
+        renderFindings();
+        renderSubs();
+        populateRgFilter();
+        renderRg();
         renderGroups();
+        populateInvFilters();
         renderInventory();
-        renderRecommendations();
+        renderSku();
         renderQuota();
-        renderMetadata();
+        renderCrg();
+        renderDepFail();
+        renderCollection();
+        populatePvmFilters();
+        renderPerfVm();
+        populateInsFilters();
+        renderVmInsights();
+        initAllSortable();
       }
 
-      // ---------------------------------------------------------------------------
-      // Dashboard
-      // ---------------------------------------------------------------------------
+      // ── Meta ───────────────────────────────────────────
+      function renderMeta() {
+        var d = document.getElementById("meta-date");
+        if (d)
+          d.textContent = meta.run_date
+            ? "\uD83D\uDCC5 " + meta.run_date.split("T")[0]
+            : "";
+        var v = document.getElementById("meta-version");
+        if (v) v.textContent = meta.tool_version ? "v" + meta.tool_version : "";
+      }
+
+      // ── Dashboard ──────────────────────────────────────
       function renderDashboard() {
-        const totalVMs = vms.length;
-        const underutil = recs.filter(
-          (r) => r.category === "underutilized",
-        ).length;
-        const rightsize = recs.filter(
-          (r) => r.category === "right-size",
-        ).length;
-        const paas = recs.filter((r) => r.category === "PaaS-candidate").length;
-        const quotaAlerts = quota.filter((q) => q.alert).length;
+        function set(id, v) {
+          var el = document.getElementById(id);
+          if (el) el.textContent = fmtNum(v != null ? v : "\u2014");
+        }
+        set("kpi-total", overview.total_vms);
+        set("kpi-running", overview.running_vms);
+        set("kpi-stopped", overview.stopped_vms);
+        set("kpi-findings", overview.total_findings);
+        set("kpi-ready", overview.ready_count);
+        set("kpi-likely", overview.likely_count);
+        set("kpi-discovery", overview.discovery_count);
+        set("kpi-quota", overview.quota_alerts);
 
-        const cards = document.getElementById("summary-cards");
-        cards.innerHTML = `
-    ${card("Total VMs", totalVMs, "")}
-    ${card("Underutilized", underutil, underutil > 0 ? "yellow" : "green")}
-    ${card("Right-size", rightsize, rightsize > 0 ? "yellow" : "green")}
-    ${card("PaaS Candidates", paas, paas > 0 ? "blue" : "")}
-    ${card("Quota Alerts", quotaAlerts, quotaAlerts > 0 ? "red" : "green")}
-  `;
-
-        // Subscription CPU chart
-        const subLabels = subSummary.map((s) => s.group_name);
-        const subCpuData = subSummary.map((s) => s.avg_cpu_pct ?? 0);
-        const subCtx = document.getElementById("sub-chart");
-        if (subChart) subChart.destroy();
-        subChart = new Chart(subCtx, {
+        var cats = ["rightsize", "swap", "decom", "cleanup", "quota", "crr"];
+        var catLabels = [
+          "Rightsize",
+          "Swap",
+          "Decommission",
+          "Cleanup",
+          "Quota",
+          "CRR",
+        ];
+        var byCat = overview.by_category || {};
+        var catCtx = document.getElementById("chart-category").getContext("2d");
+        if (chartCategory) chartCategory.destroy();
+        chartCategory = new Chart(catCtx, {
           type: "bar",
           data: {
-            labels: subLabels,
+            labels: catLabels,
             datasets: [
               {
-                label: "Avg CPU %",
-                data: subCpuData,
-                backgroundColor: subCpuData.map((v) =>
-                  v < 40 ? "#C6EFCE" : v < 70 ? "#FFEB9C" : "#FFC7CE",
-                ),
-                borderColor: subCpuData.map((v) =>
-                  v < 40 ? "#375623" : v < 70 ? "#7D6608" : "#9C0006",
-                ),
-                borderWidth: 1,
+                label: "READY",
+                data: cats.map(function (c) {
+                  return (byCat[c] && byCat[c].ready) || 0;
+                }),
+                backgroundColor: "#38a169",
+              },
+              {
+                label: "LIKELY",
+                data: cats.map(function (c) {
+                  return (byCat[c] && byCat[c].likely) || 0;
+                }),
+                backgroundColor: "#3182ce",
+              },
+              {
+                label: "DISCOVERY",
+                data: cats.map(function (c) {
+                  return (byCat[c] && byCat[c].discovery) || 0;
+                }),
+                backgroundColor: "#ed8936",
+              },
+              {
+                label: "INSUFF.",
+                data: cats.map(function (c) {
+                  return (byCat[c] && byCat[c].insufficient) || 0;
+                }),
+                backgroundColor: "#e53e3e",
               },
             ],
           },
           options: {
-            plugins: { legend: { display: false } },
+            responsive: true,
             scales: {
-              y: { max: 100, title: { display: true, text: "% CPU" } },
+              x: { stacked: true },
+              y: { stacked: true, beginAtZero: true },
+            },
+            plugins: {
+              legend: {
+                position: "bottom",
+                labels: { boxWidth: 12, font: { size: 11 } },
+              },
             },
           },
         });
 
-        // Rec category chart
-        const recCtx = document.getElementById("rec-chart");
-        if (recChart) recChart.destroy();
-        const cats = ["underutilized", "right-size", "PaaS-candidate"];
-        const catCounts = cats.map(
-          (c) => recs.filter((r) => r.category === c).length,
-        );
-        recChart = new Chart(recCtx, {
+        var byConf = overview.by_confidence || {};
+        var confCtx = document
+          .getElementById("chart-confidence")
+          .getContext("2d");
+        if (chartConfidence) chartConfidence.destroy();
+        chartConfidence = new Chart(confCtx, {
           type: "doughnut",
           data: {
-            labels: ["Underutilized", "Right-size", "PaaS Candidate"],
+            labels: ["HIGH", "MEDIUM", "LOW"],
             datasets: [
               {
-                data: catCounts,
-                backgroundColor: ["#FFEB9C", "#BDD7EE", "#C6EFCE"],
+                data: [byConf.HIGH || 0, byConf.MEDIUM || 0, byConf.LOW || 0],
+                backgroundColor: ["#38a169", "#d97706", "#e53e3e"],
+                borderWidth: 2,
               },
             ],
           },
-          options: { plugins: { legend: { position: "right" } } },
+          options: {
+            responsive: true,
+            plugins: {
+              legend: {
+                position: "bottom",
+                labels: { boxWidth: 12, font: { size: 11 } },
+              },
+            },
+          },
         });
-      }
 
-      function card(label, value, colour) {
-        return `<div class="card"><div class="card-label">${label}</div><div class="card-value ${colour}">${value}</div></div>`;
-      }
-
-      // ---------------------------------------------------------------------------
-      // Subscriptions
-      // ---------------------------------------------------------------------------
-      function renderSubscriptions() {
-        const body = document.getElementById("subs-body");
-        body.innerHTML = subSummary
-          .map(
-            (s) => `
-    <tr>
-      <td>${s.subscription_name}</td>
-      <td>${s.vm_sku}</td>
-      <td>${s.vm_count}</td>
-      <td>${utilPill(s.avg_cpu_pct)}</td>
-      <td>${utilPill(s.avg_mem_pct)}</td>
-    </tr>`,
-          )
-          .join("");
-      }
-
-      // ---------------------------------------------------------------------------
-      // Resource Groups
-      // ---------------------------------------------------------------------------
-      function renderResourceGroups() {
-        const body = document.getElementById("rg-body");
-        body.innerHTML = rgSummary
-          .map(
-            (s) => `
-    <tr>
-      <td>${s.subscription_name}</td>
-      <td>${s.resource_group}</td>
-      <td>${s.vm_sku}</td>
-      <td>${s.vm_count}</td>
-      <td>${utilPill(s.avg_cpu_pct)}</td>
-      <td>${utilPill(s.avg_mem_pct)}</td>
-    </tr>`,
-          )
-          .join("");
-      }
-
-      // ---------------------------------------------------------------------------
-      // VM Groups
-      // ---------------------------------------------------------------------------
-      function renderGroups() {
-        const typeFilter = document.getElementById("group-type-filter").value;
-        const data = typeFilter
-          ? groupSummary.filter((g) => g.group_type === typeFilter)
-          : groupSummary;
-        const body = document.getElementById("groups-body");
-        body.innerHTML = data
-          .map(
-            (g) => `
-    <tr>
-      <td>${g.subscription_name}</td>
-      <td>${g.resource_group}</td>
-      <td>${g.group_name}</td>
-      <td>${groupTypePill(g.group_type)}</td>
-      <td>${g.vm_sku}</td>
-      <td>${g.vm_count}</td>
-      <td>${utilPill(g.avg_cpu_pct)}</td>
-      <td>${utilPill(g.avg_mem_pct)}</td>
-    </tr>`,
-          )
-          .join("");
-      }
-
-      // ---------------------------------------------------------------------------
-      // Inventory
-      // ---------------------------------------------------------------------------
-      function populateFilters() {
-        const subs = [...new Set(vms.map((v) => v.subscription_name))].sort();
-        const rgs = [...new Set(vms.map((v) => v.resource_group))].sort();
-        const skus = [...new Set(vms.map((v) => v.vm_sku))].sort();
-        fillSelect("inv-sub", subs, "All subscriptions");
-        fillSelect("inv-rg", rgs, "All resource groups");
-        fillSelect("inv-sku", skus, "All SKUs");
-      }
-
-      function renderInventory() {
-        const search = document
-          .getElementById("inv-search")
-          .value.toLowerCase();
-        const sub = document.getElementById("inv-sub").value;
-        const rg = document.getElementById("inv-rg").value;
-        const sku = document.getElementById("inv-sku").value;
-
-        let data = vms;
-        if (sub) data = data.filter((v) => v.subscription_name === sub);
-        if (rg) data = data.filter((v) => v.resource_group === rg);
-        if (sku) data = data.filter((v) => v.vm_sku === sku);
-        if (search)
-          data = data.filter(
-            (v) =>
-              v.vm_name.toLowerCase().includes(search) ||
-              v.resource_group.toLowerCase().includes(search) ||
-              v.vm_sku.toLowerCase().includes(search),
-          );
-
-        const body = document.getElementById("inv-body");
-        body.innerHTML = data
-          .slice(0, 500)
-          .map(
-            (v) => `
-    <tr>
-      <td>${v.vm_name ? `<strong>${v.vm_name}</strong>` : ""}</td>
-      <td>${v.subscription_name}</td>
-      <td>${v.resource_group}</td>
-      <td>${v.vm_sku}</td>
-      <td>${v.vcpus}</td>
-      <td>${v.memory_gb}</td>
-      <td>${v.region}</td>
-      <td>${v.os_type}</td>
-      <td>${v.os_version || "—"}</td>
-      <td>${v.power_state ? v.power_state.replace("PowerState/", "") : "—"}</td>
-      <td>${v.image_publisher || "—"}</td>
-      <td>${v.image_offer || "—"}</td>
-      <td>${v.image_sku || "—"}</td>
-      <td>${v.image_version || "—"}</td>
-      <td>${v.availability_zone || "—"}</td>
-      <td>${v.vmss_name || "—"}</td>
-      <td>${v.availability_set_name || "—"}</td>
-      <td style="background:var(--csa)">${v.workload || ""}</td>
-      <td style="background:var(--csa)">${v.application || ""}</td>
-      <td style="background:var(--csa)">${v.environment || ""}</td>
-      <td style="background:var(--csa)">${v.criticality || ""}</td>
-      <td style="background:var(--csa)">${v.owner || ""}</td>
-    </tr>`,
-          )
-          .join("");
-
-        document.getElementById("inv-count").textContent =
-          `Showing ${Math.min(500, data.length)} of ${data.length} VMs`;
-      }
-
-      // ---------------------------------------------------------------------------
-      // Recommendations
-      // ---------------------------------------------------------------------------
-      function renderRecommendations() {
-        const cat = document.getElementById("rec-cat").value;
-        const override = document.getElementById("rec-override").value;
-
-        let data = recs;
-        if (cat) data = data.filter((r) => r.category === cat);
-        if (override) data = data.filter((r) => r.manual_override === override);
-
-        const body = document.getElementById("rec-body");
-        body.innerHTML = data
-          .map(
-            (r) => `
-    <tr>
-      <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis" title="${r.resource_id}">${r.resource_id}</td>
-      <td>${r.current_sku}</td>
-      <td>${r.recommended_sku || "—"}</td>
-      <td>${categoryPill(r.category)}</td>
-      <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis" title="${r.recommended_action || ""}">${r.recommended_action || "—"}</td>
-      <td>${r.estimated_savings_pct != null ? r.estimated_savings_pct + "%" : "—"}</td>
-      <td>${overridePill(r.manual_override)}</td>
-      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis" title="${r.notes || ""}">${r.notes || ""}</td>
-    </tr>`,
-          )
-          .join("");
-      }
-
-      // ---------------------------------------------------------------------------
-      // Quota
-      // ---------------------------------------------------------------------------
-      function renderQuota() {
-        const alertsOnly =
-          document.getElementById("quota-alerts-only")?.checked;
-        let data = quota;
-        if (alertsOnly) data = data.filter((q) => q.alert);
-
-        const body = document.getElementById("quota-body");
-        body.innerHTML = data
-          .map((q) => {
-            const rowStyle = q.alert ? "background:#FFC7CE" : "";
-            const pct = q.utilization_pct;
-            const cls =
-              pct >= 90 ? "pill-red" : pct >= 80 ? "pill-yellow" : "pill-green";
-            return `
-    <tr style="${rowStyle}">
-      <td>${q.subscription_name}</td>
-      <td>${q.region}</td>
-      <td>${q.resource_type}</td>
-      <td>${q.display_name}</td>
-      <td>${q.current_usage}</td>
-      <td>${q.quota_limit}</td>
-      <td><span class="pill ${cls}">${pct}%</span></td>
-      <td>${q.alert ? '<span class="pill pill-red">ALERT</span>' : ""}</td>
-    </tr>`;
+        var ready = findings
+          .filter(function (f) {
+            return (
+              f.readiness === "READY" && f.finding_type === "RECOMMENDATION"
+            );
+          })
+          .slice(0, 15);
+        var el = document.getElementById("top-ready-count");
+        if (el) el.textContent = ready.length + " shown";
+        var rows = ready
+          .map(function (f) {
+            var vmShort = f.vm_id.split("/").pop();
+            return (
+              '<tr><td><code style="font-size:12px">' +
+              esc(f.code) +
+              "</code></td>" +
+              "<td>" +
+              badgeCat(f.category) +
+              "</td>" +
+              '<td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' +
+              esc(f.vm_id) +
+              '">' +
+              esc(vmShort) +
+              "</td>" +
+              "<td>" +
+              esc(f.current || "\u2014") +
+              "</td>" +
+              "<td>" +
+              esc(f.proposed || "\u2014") +
+              "</td>" +
+              '<td style="max-width:240px;white-space:normal;font-size:12px;color:var(--muted)">' +
+              esc(f.rationale) +
+              "</td>" +
+              "<td>" +
+              badgeConfidence(f.confidence) +
+              "</td></tr>"
+            );
           })
           .join("");
-
-        document.getElementById("quota-count").textContent =
-          `Showing ${data.length} of ${quota.length} quota entries` +
-          (quota.filter((q) => q.alert).length
-            ? ` — ${quota.filter((q) => q.alert).length} alert(s)`
-            : "");
+        tbody("top-ready-body", rows);
       }
 
-      // ---------------------------------------------------------------------------
-      // Metadata
-      // ---------------------------------------------------------------------------
-      function renderMetadata() {
-        const t = meta.thresholds || {};
-        const rows = [
-          ["Run Date (UTC)", meta.run_date || "—"],
-          ["Tool Version", meta.tool_version || "—"],
-          ["Metrics Period", `${meta.metrics_period_days} days`],
-          ["Total VM Count", meta.total_vm_count],
-          ["Subscriptions Scanned", (meta.subscriptions_scanned || []).length],
-          ["", ""],
-          ["Underutilized CPU threshold", `${t.underutilized_cpu_avg}%`],
-          ["Underutilized Memory threshold", `${t.underutilized_memory_avg}%`],
-          ["Oversized CPU P95 threshold", `${t.oversize_cpu_p95}%`],
-          ["Headroom Multiplier", `${t.headroom_multiplier}x`],
-          ["PaaS Candidate CPU threshold", `${t.paas_candidate_cpu_avg}%`],
-        ];
-        document.getElementById("meta-table").innerHTML = rows
-          .map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`)
+      // ── Decisions ──────────────────────────────────────
+      function renderFindings() {
+        var type = document.getElementById("f-type").value;
+        var cat = document.getElementById("f-cat").value;
+        var rdy = document.getElementById("f-readiness").value;
+        var conf = document.getElementById("f-confidence").value;
+        var q = (document.getElementById("f-search").value || "").toLowerCase();
+        var items = findings;
+        if (type)
+          items = items.filter(function (f) {
+            return f.finding_type === type;
+          });
+        if (cat)
+          items = items.filter(function (f) {
+            return f.category === cat;
+          });
+        if (rdy)
+          items = items.filter(function (f) {
+            return f.readiness === rdy;
+          });
+        if (conf)
+          items = items.filter(function (f) {
+            return f.confidence === conf;
+          });
+        if (q)
+          items = items.filter(function (f) {
+            return (
+              f.vm_id.toLowerCase().indexOf(q) >= 0 ||
+              f.code.toLowerCase().indexOf(q) >= 0 ||
+              (f.rationale || "").toLowerCase().indexOf(q) >= 0
+            );
+          });
+        var cnt = document.getElementById("findings-count");
+        if (cnt) cnt.textContent = items.length + " results";
+        var rows = items
+          .map(function (f) {
+            var vmShort = f.vm_id.split("/").pop();
+            return (
+              '<tr><td><code style="font-size:12px">' +
+              esc(f.code) +
+              "</code></td>" +
+              "<td><small>" +
+              esc(f.finding_type) +
+              "</small></td>" +
+              "<td>" +
+              badgeCat(f.category) +
+              "</td>" +
+              "<td>" +
+              badgeReadiness(f.readiness) +
+              "</td>" +
+              "<td>" +
+              badgeConfidence(f.confidence) +
+              "</td>" +
+              '<td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' +
+              esc(f.vm_id) +
+              '">' +
+              esc(vmShort) +
+              "</td>" +
+              "<td>" +
+              esc(f.current || "\u2014") +
+              "</td>" +
+              "<td>" +
+              esc(f.proposed || "\u2014") +
+              "</td>" +
+              '<td style="max-width:220px;white-space:normal;font-size:12px;color:var(--muted)">' +
+              esc(f.rationale) +
+              "</td></tr>"
+            );
+          })
           .join("");
+        tbody("findings-body", rows);
       }
 
-      // ---------------------------------------------------------------------------
-      // Helpers
-      // ---------------------------------------------------------------------------
-      function utilPill(v) {
-        if (v == null) return '<span class="pill pill-gray">N/A</span>';
-        const cls = v < 40 ? "pill-green" : v < 70 ? "pill-yellow" : "pill-red";
-        return `<span class="pill ${cls}">${v}%</span>`;
-      }
-
-      function categoryPill(c) {
-        const map = {
-          underutilized: "pill-yellow",
-          "right-size": "pill-blue",
-          "PaaS-candidate": "pill-green",
-        };
-        return `<span class="pill ${map[c] || "pill-gray"}">${c}</span>`;
-      }
-
-      function overridePill(o) {
-        if (!o) return '<span class="pill pill-gray">pending</span>';
-        const map = {
-          accept: "pill-green",
-          reject: "pill-red",
-          defer: "pill-yellow",
-        };
-        return `<span class="pill ${map[o] || "pill-gray"}">${o}</span>`;
-      }
-
-      function groupTypePill(t) {
-        const map = {
-          VMSS: "pill-blue",
-          AvailabilitySet: "pill-green",
-          None: "pill-gray",
-        };
-        return `<span class="pill ${map[t] || "pill-gray"}">${t}</span>`;
-      }
-
-      function topSkus(dist) {
-        if (!dist) return "";
-        return Object.entries(dist)
-          .slice(0, 3)
-          .map(
-            ([sku, n]) =>
-              `<span class="pill pill-gray" style="margin:1px">${sku} (${n})</span>`,
-          )
+      // ── Subscriptions ──────────────────────────────────
+      function renderSubs() {
+        var rows = subData
+          .map(function (s) {
+            var topSkus = Object.keys(s.sku_distribution || {})
+              .slice(0, 3)
+              .map(function (k) {
+                return k + " (" + s.sku_distribution[k] + ")";
+              })
+              .join(", ");
+            return (
+              "<tr><td><strong>" +
+              esc(s.subscription_name) +
+              "</strong></td>" +
+              "<td>" +
+              fmtNum(s.vm_count) +
+              "</td><td>" +
+              fmtNum(s.running_count) +
+              "</td><td>" +
+              fmtNum(s.stopped_count) +
+              "</td>" +
+              "<td>" +
+              pbarHtml(s.avg_cpu_pct) +
+              "</td><td>" +
+              pbarHtml(s.avg_mem_pct) +
+              "</td>" +
+              "<td>" +
+              fmtNum(s.finding_count) +
+              "</td><td>" +
+              fmtNum(s.ready_count) +
+              "</td>" +
+              '<td style="font-size:12px;color:var(--muted)">' +
+              esc(topSkus || "\u2014") +
+              "</td></tr>"
+            );
+          })
           .join("");
-      }
-
-      function fillSelect(id, options, placeholder) {
-        const el = document.getElementById(id);
-        const cur = el.value;
-        el.innerHTML =
-          `<option value="">${placeholder}</option>` +
-          options
-            .map(
-              (o) =>
-                `<option value="${o}"${o === cur ? " selected" : ""}>${o}</option>`,
-            )
-            .join("");
-      }
-
-      function sortTable(tableId, colIdx) {
-        const tbody = document.querySelector(`#${tableId} tbody`);
-        const rows = [...tbody.querySelectorAll("tr")];
-        const asc =
-          tbody.dataset.sortCol == colIdx && tbody.dataset.sortDir !== "asc";
-        tbody.dataset.sortCol = colIdx;
-        tbody.dataset.sortDir = asc ? "asc" : "desc";
-        rows.sort((a, b) => {
-          const av = a.cells[colIdx]?.textContent?.trim() ?? "";
-          const bv = b.cells[colIdx]?.textContent?.trim() ?? "";
-          const an = parseFloat(av),
-            bn = parseFloat(bv);
-          const cmp = !isNaN(an) && !isNaN(bn) ? an - bn : av.localeCompare(bv);
-          return asc ? cmp : -cmp;
+        tbody("subs-body", rows);
+        var subCtx = document.getElementById("chart-subs").getContext("2d");
+        if (chartSubs) chartSubs.destroy();
+        chartSubs = new Chart(subCtx, {
+          type: "bar",
+          data: {
+            labels: subData.map(function (s) {
+              return s.subscription_name;
+            }),
+            datasets: [
+              {
+                label: "Running",
+                data: subData.map(function (s) {
+                  return s.running_count || 0;
+                }),
+                backgroundColor: "#38a169",
+              },
+              {
+                label: "Stopped",
+                data: subData.map(function (s) {
+                  return s.stopped_count || 0;
+                }),
+                backgroundColor: "#e53e3e",
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            indexAxis: "y",
+            scales: {
+              x: { stacked: true, beginAtZero: true },
+              y: { stacked: true },
+            },
+            plugins: {
+              legend: {
+                position: "bottom",
+                labels: { boxWidth: 12, font: { size: 11 } },
+              },
+            },
+          },
         });
-        rows.forEach((r) => tbody.appendChild(r));
       }
 
-      async function fetchJSON(url, method = "GET") {
-        const res = await fetch(url, { method });
-        if (!res.ok) return method === "GET" ? [] : {};
-        return res.json();
+      // ── Resource Groups ────────────────────────────────
+      function populateRgFilter() {
+        var subs = [
+          ...new Set(
+            rgData.map(function (r) {
+              return r.subscription_name;
+            }),
+          ),
+        ].sort();
+        var sel = document.getElementById("rg-sub-filter");
+        var cur = sel.value;
+        sel.innerHTML =
+          '<option value="">All</option>' +
+          subs
+            .map(function (s) {
+              return '<option value="' + esc(s) + '">' + esc(s) + "</option>";
+            })
+            .join("");
+        if (cur) sel.value = cur;
       }
+      function renderRg() {
+        var sub = document.getElementById("rg-sub-filter").value;
+        var q = (
+          document.getElementById("rg-search").value || ""
+        ).toLowerCase();
+        var items = rgData;
+        if (sub)
+          items = items.filter(function (r) {
+            return r.subscription_name === sub;
+          });
+        if (q)
+          items = items.filter(function (r) {
+            return r.resource_group.toLowerCase().indexOf(q) >= 0;
+          });
+        var cnt = document.getElementById("rg-count");
+        if (cnt) cnt.textContent = items.length + " resource groups";
+        var rows = items
+          .map(function (r) {
+            return (
+              "<tr><td>" +
+              esc(r.subscription_name) +
+              "</td><td><strong>" +
+              esc(r.resource_group) +
+              "</strong></td>" +
+              "<td>" +
+              fmtNum(r.vm_count) +
+              "</td><td>" +
+              fmtNum(r.running_count) +
+              "</td><td>" +
+              fmtNum(r.stopped_count) +
+              "</td>" +
+              "<td>" +
+              pbarHtml(r.avg_cpu_pct) +
+              "</td><td>" +
+              pbarHtml(r.avg_mem_pct) +
+              "</td>" +
+              "<td>" +
+              fmtNum(r.finding_count) +
+              "</td><td>" +
+              fmtNum(r.ready_count) +
+              "</td></tr>"
+            );
+          })
+          .join("");
+        tbody("rg-body", rows);
+      }
+
+      // ── VM Groups ──────────────────────────────────────
+      function renderGroups() {
+        var type = document.getElementById("grp-type-filter").value;
+        var q = (
+          document.getElementById("grp-search").value || ""
+        ).toLowerCase();
+        var items = groupData;
+        if (type)
+          items = items.filter(function (g) {
+            return g.group_type === type;
+          });
+        if (q)
+          items = items.filter(function (g) {
+            return (
+              g.group_name.toLowerCase().indexOf(q) >= 0 ||
+              g.resource_group.toLowerCase().indexOf(q) >= 0
+            );
+          });
+        var cnt = document.getElementById("grp-count");
+        if (cnt) cnt.textContent = items.length + " rows";
+        function typeLabel(t) {
+          if (t === "VMSS") return '<span class="badge badge-vmss">VMSS</span>';
+          if (t === "AvailabilitySet")
+            return '<span class="badge badge-avset">AvSet</span>';
+          return '<span class="badge badge-none">\u2014</span>';
+        }
+        var rows = items
+          .map(function (g) {
+            return (
+              "<tr><td>" +
+              esc(g.subscription_name) +
+              "</td><td>" +
+              esc(g.resource_group) +
+              "</td>" +
+              "<td><strong>" +
+              esc(g.group_name) +
+              "</strong></td><td>" +
+              typeLabel(g.group_type) +
+              "</td>" +
+              "<td><code>" +
+              esc(g.vm_sku) +
+              "</code></td><td>" +
+              fmtNum(g.vm_count) +
+              "</td>" +
+              "<td>" +
+              pbarHtml(g.avg_cpu_pct) +
+              "</td><td>" +
+              pbarHtml(g.avg_mem_pct) +
+              "</td>" +
+              "<td>" +
+              fmtNum(g.finding_count) +
+              "</td><td>" +
+              fmtNum(g.ready_count) +
+              "</td></tr>"
+            );
+          })
+          .join("");
+        tbody("grp-body", rows);
+      }
+
+      // ── VM Inventory ───────────────────────────────────
+      function populateInvFilters() {
+        function fillSel(id, vals) {
+          var sel = document.getElementById(id);
+          var cur = sel.value;
+          var base = sel.options[0].outerHTML;
+          var uniq = [...new Set(vals)].filter(Boolean).sort();
+          sel.innerHTML =
+            base +
+            uniq
+              .map(function (v) {
+                return '<option value="' + esc(v) + '">' + esc(v) + "</option>";
+              })
+              .join("");
+          if (cur) sel.value = cur;
+        }
+        fillSel(
+          "inv-sub",
+          vms.map(function (v) {
+            return v.subscription_name;
+          }),
+        );
+        fillSel(
+          "inv-rg",
+          vms.map(function (v) {
+            return v.resource_group;
+          }),
+        );
+        fillSel(
+          "inv-sku",
+          vms.map(function (v) {
+            return v.vm_sku;
+          }),
+        );
+      }
+      function renderInventory() {
+        var sub = document.getElementById("inv-sub").value;
+        var rg = document.getElementById("inv-rg").value;
+        var sku = document.getElementById("inv-sku").value;
+        var state = document.getElementById("inv-state").value;
+        var q = (
+          document.getElementById("inv-search").value || ""
+        ).toLowerCase();
+        var items = vms;
+        if (sub)
+          items = items.filter(function (v) {
+            return v.subscription_name === sub;
+          });
+        if (rg)
+          items = items.filter(function (v) {
+            return v.resource_group === rg;
+          });
+        if (sku)
+          items = items.filter(function (v) {
+            return v.vm_sku === sku;
+          });
+        if (state === "running")
+          items = items.filter(function (v) {
+            return (v.power_state || "").toLowerCase().indexOf("running") >= 0;
+          });
+        if (state === "stopped")
+          items = items.filter(function (v) {
+            var s = (v.power_state || "").toLowerCase();
+            return s.indexOf("stopped") >= 0 || s.indexOf("deallocated") >= 0;
+          });
+        if (q)
+          items = items.filter(function (v) {
+            return (
+              v.vm_name.toLowerCase().indexOf(q) >= 0 ||
+              v.resource_group.toLowerCase().indexOf(q) >= 0 ||
+              (v.vm_sku || "").toLowerCase().indexOf(q) >= 0
+            );
+          });
+        var total = items.length;
+        var page = items.slice(invPage * PAGE_SIZE, (invPage + 1) * PAGE_SIZE);
+        var cnt = document.getElementById("inv-count");
+        if (cnt) cnt.textContent = total + " VMs";
+        var pi = document.getElementById("inv-page-info");
+        if (pi)
+          pi.textContent =
+            total > PAGE_SIZE
+              ? "Showing " +
+                (invPage * PAGE_SIZE + 1) +
+                "\u2013" +
+                Math.min((invPage + 1) * PAGE_SIZE, total) +
+                " of " +
+                total +
+                ". Use filters to narrow down."
+              : "";
+        var csa = 'style="background:rgba(189,215,238,.18)"';
+        var rows = page
+          .map(function (v) {
+            return (
+              "<tr><td><strong>" +
+              esc(v.vm_name) +
+              "</strong></td>" +
+              "<td>" +
+              esc(v.subscription_name) +
+              "</td><td>" +
+              esc(v.resource_group) +
+              "</td>" +
+              "<td><code>" +
+              esc(v.vm_sku) +
+              "</code></td>" +
+              '<td style="text-align:right">' +
+              (v.vcpus != null ? v.vcpus : "\u2014") +
+              "</td>" +
+              '<td style="text-align:right">' +
+              (v.memory_gb != null ? v.memory_gb : "\u2014") +
+              "</td>" +
+              "<td>" +
+              esc(v.region) +
+              "</td><td>" +
+              esc(v.os_type || "\u2014") +
+              "</td>" +
+              "<td>" +
+              badgeState(v.power_state) +
+              "</td>" +
+              '<td style="font-size:12px">' +
+              esc(v.vmss_name || "\u2014") +
+              "</td>" +
+              '<td style="font-size:12px">' +
+              esc(v.availability_set_name || "\u2014") +
+              "</td>" +
+              "<td>" +
+              esc(v.availability_zone || "\u2014") +
+              "</td>" +
+              "<td " +
+              csa +
+              ">" +
+              esc(v.workload || "\u2014") +
+              "</td>" +
+              "<td " +
+              csa +
+              ">" +
+              esc(v.application || "\u2014") +
+              "</td>" +
+              "<td " +
+              csa +
+              ">" +
+              esc(v.environment || "\u2014") +
+              "</td>" +
+              "<td " +
+              csa +
+              ">" +
+              esc(v.criticality || "\u2014") +
+              "</td>" +
+              "<td " +
+              csa +
+              ">" +
+              esc(v.owner || "\u2014") +
+              "</td></tr>"
+            );
+          })
+          .join("");
+        tbody("inv-body", rows);
+      }
+
+      // ── SKU Analysis ───────────────────────────────────
+      function renderSku() {
+        var rows = skuData
+          .map(function (s) {
+            return (
+              "<tr><td><code><strong>" +
+              esc(s.vm_sku) +
+              "</strong></code></td>" +
+              '<td style="text-align:right">' +
+              (s.vcpus != null ? s.vcpus : "\u2014") +
+              "</td>" +
+              '<td style="text-align:right">' +
+              (s.memory_gb != null ? s.memory_gb : "\u2014") +
+              "</td>" +
+              '<td style="text-align:right"><strong>' +
+              fmtNum(s.vm_count) +
+              "</strong></td>" +
+              "<td>" +
+              fmtNum(s.running_count) +
+              "</td><td>" +
+              fmtNum(s.stopped_count) +
+              "</td>" +
+              "<td>" +
+              pbarHtml(s.avg_cpu_pct) +
+              "</td><td>" +
+              pbarHtml(s.avg_mem_pct) +
+              "</td></tr>"
+            );
+          })
+          .join("");
+        tbody("sku-body", rows);
+        var top15 = skuData.slice(0, 15);
+        var skuCtx = document.getElementById("chart-sku").getContext("2d");
+        if (chartSku) chartSku.destroy();
+        chartSku = new Chart(skuCtx, {
+          type: "bar",
+          data: {
+            labels: top15.map(function (s) {
+              return s.vm_sku;
+            }),
+            datasets: [
+              {
+                label: "Running",
+                data: top15.map(function (s) {
+                  return s.running_count || 0;
+                }),
+                backgroundColor: "#2e75b6",
+              },
+              {
+                label: "Stopped",
+                data: top15.map(function (s) {
+                  return s.stopped_count || 0;
+                }),
+                backgroundColor: "#e53e3e",
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            scales: {
+              x: { stacked: true, beginAtZero: true },
+              y: { stacked: true },
+            },
+            plugins: {
+              legend: {
+                position: "bottom",
+                labels: { boxWidth: 12, font: { size: 11 } },
+              },
+            },
+          },
+        });
+      }
+
+      // ── Quota ──────────────────────────────────────────
+      function renderQuota() {
+        var alertOnly = document.getElementById("quota-alert-only").checked;
+        var q = (
+          document.getElementById("quota-search").value || ""
+        ).toLowerCase();
+        var items = quota;
+        if (alertOnly)
+          items = items.filter(function (x) {
+            return x.alert;
+          });
+        if (q)
+          items = items.filter(function (x) {
+            return (
+              (x.display_name || "").toLowerCase().indexOf(q) >= 0 ||
+              (x.resource_type || "").toLowerCase().indexOf(q) >= 0 ||
+              (x.region || "").toLowerCase().indexOf(q) >= 0
+            );
+          });
+        var cnt = document.getElementById("quota-count");
+        if (cnt) cnt.textContent = items.length + " items";
+        var rows = items
+          .map(function (x) {
+            var pct = x.utilization_pct || 0;
+            var alertBadge = x.alert
+              ? '<span class="badge badge-insufficient">&#x26A0; Alert</span>'
+              : '<span class="badge" style="background:#e2f0d9;color:#375623">OK</span>';
+            return (
+              "<tr><td>" +
+              esc(x.subscription_name) +
+              "</td><td>" +
+              esc(x.region) +
+              "</td>" +
+              '<td style="font-size:12px">' +
+              esc(x.resource_type) +
+              "</td><td>" +
+              esc(x.display_name) +
+              "</td>" +
+              '<td style="text-align:right">' +
+              fmtNum(x.current_usage) +
+              "</td>" +
+              '<td style="text-align:right">' +
+              fmtNum(x.quota_limit) +
+              "</td>" +
+              "<td>" +
+              pbarHtml(pct) +
+              "</td><td>" +
+              alertBadge +
+              "</td></tr>"
+            );
+          })
+          .join("");
+        tbody("quota-body", rows);
+      }
+
+      // ── Capacity Reservations ──────────────────────────
+      function renderCrg() {
+        var cnt = document.getElementById("crg-count");
+        if (cnt) cnt.textContent = crg.length + " groups";
+        var rows = crg
+          .map(function (g) {
+            return (
+              "<tr><td><strong>" +
+              esc(g.group_name) +
+              "</strong></td>" +
+              '<td style="font-size:12px">' +
+              esc(g.subscription_id) +
+              "</td>" +
+              "<td>" +
+              esc(g.region) +
+              "</td>" +
+              "<td>" +
+              ((g.zones || []).join(", ") || "\u2014") +
+              "</td>" +
+              '<td style="text-align:right">' +
+              fmtNum(g.reserved_count_total) +
+              "</td>" +
+              '<td style="text-align:right">' +
+              fmtNum(g.used_count_total) +
+              "</td>" +
+              "<td>" +
+              fillRate(g.fill_rate_pct) +
+              "</td></tr>"
+            );
+          })
+          .join("");
+        tbody("crg-body", rows);
+      }
+
+      // ── Deployment Failures ────────────────────────────
+      function renderDepFail() {
+        var sel = document.getElementById("depfail-class");
+        if (sel.options.length === 1) {
+          var classes = [
+            ...new Set(
+              depFail
+                .map(function (f) {
+                  return f.error_class;
+                })
+                .filter(Boolean),
+            ),
+          ].sort();
+          classes.forEach(function (c) {
+            sel.appendChild(new Option(c, c));
+          });
+        }
+        var cls = sel.value;
+        var q = (
+          document.getElementById("depfail-search").value || ""
+        ).toLowerCase();
+        var items = depFail;
+        if (cls)
+          items = items.filter(function (f) {
+            return f.error_class === cls;
+          });
+        if (q)
+          items = items.filter(function (f) {
+            return (
+              (f.resource_name || "").toLowerCase().indexOf(q) >= 0 ||
+              (f.resource_group || "").toLowerCase().indexOf(q) >= 0
+            );
+          });
+        var cnt = document.getElementById("depfail-count");
+        if (cnt) cnt.textContent = items.length + " failures";
+        var rows = items
+          .map(function (f) {
+            return (
+              "<tr><td><strong>" +
+              esc(f.resource_name) +
+              "</strong></td>" +
+              '<td style="font-size:12px">' +
+              esc(f.resource_type) +
+              "</td>" +
+              "<td>" +
+              esc(f.resource_group) +
+              "</td>" +
+              '<td style="font-size:12px">' +
+              esc(f.subscription_id) +
+              "</td>" +
+              '<td><span class="badge badge-insufficient">' +
+              esc(f.error_class || "\u2014") +
+              "</span></td>" +
+              '<td style="font-size:12px">' +
+              esc(f.operation_name || "\u2014") +
+              "</td>" +
+              '<td style="font-size:12px;white-space:nowrap">' +
+              esc(f.timestamp || "\u2014") +
+              "</td></tr>"
+            );
+          })
+          .join("");
+        tbody("depfail-body", rows);
+      }
+
+      // ── Collection Info ────────────────────────────────
+      function renderCollection() {
+        var fields = [
+          ["Run Date", meta.run_date],
+          ["Tool Version", meta.tool_version],
+          [
+            "Metrics Period",
+            meta.metrics_period_days != null
+              ? meta.metrics_period_days + " days"
+              : null,
+          ],
+          ["Total VM Count", meta.total_vm_count],
+        ];
+        var grid = document.getElementById("info-grid");
+        if (grid)
+          grid.innerHTML = fields
+            .map(function (kv) {
+              return kv[1] != null
+                ? '<div class="info-card"><dt>' +
+                    esc(kv[0]) +
+                    "</dt><dd>" +
+                    esc(String(kv[1])) +
+                    "</dd></div>"
+                : "";
+            })
+            .join("");
+        var subs = meta.subscriptions_scanned || [];
+        var card = document.getElementById("info-subs-card");
+        if (card) card.style.display = subs.length ? "" : "none";
+        var rows = subs
+          .map(function (s, i) {
+            return "<tr><td>" + (i + 1) + "</td><td>" + esc(s) + "</td></tr>";
+          })
+          .join("");
+        tbody("info-subs-body", rows);
+      }
+
+      // ── Perf by VM ─────────────────────────────────────
+      function populatePvmFilters() {
+        function fill(id, vals) {
+          var sel = document.getElementById(id);
+          var cur = sel.value;
+          var base = sel.options[0].outerHTML;
+          var uniq = Array.from(new Set(vals)).filter(Boolean).sort();
+          sel.innerHTML =
+            base +
+            uniq
+              .map(function (v) {
+                return '<option value="' + esc(v) + '">' + esc(v) + "</option>";
+              })
+              .join("");
+          if (cur) sel.value = cur;
+        }
+        fill(
+          "pvm-sub",
+          perVmData.map(function (v) {
+            return v.subscription_name;
+          }),
+        );
+        fill(
+          "pvm-rg",
+          perVmData.map(function (v) {
+            return v.resource_group;
+          }),
+        );
+      }
+      function renderPerfVm() {
+        var sub = document.getElementById("pvm-sub").value;
+        var rg = document.getElementById("pvm-rg").value;
+        var q = (
+          document.getElementById("pvm-search").value || ""
+        ).toLowerCase();
+        var items = perVmData;
+        if (sub)
+          items = items.filter(function (v) {
+            return v.subscription_name === sub;
+          });
+        if (rg)
+          items = items.filter(function (v) {
+            return v.resource_group === rg;
+          });
+        if (q)
+          items = items.filter(function (v) {
+            return (
+              v.vm_name.toLowerCase().indexOf(q) >= 0 ||
+              v.resource_group.toLowerCase().indexOf(q) >= 0
+            );
+          });
+        var cnt = document.getElementById("pvm-count");
+        if (cnt) cnt.textContent = items.length + " VMs";
+        var rows = items
+          .map(function (v) {
+            return (
+              "<tr><td><strong>" +
+              esc(v.vm_name) +
+              "</strong></td>" +
+              "<td>" +
+              esc(v.subscription_name) +
+              "</td>" +
+              "<td>" +
+              esc(v.resource_group) +
+              "</td>" +
+              "<td>" +
+              esc(v.region || "\u2014") +
+              "</td>" +
+              "<td>" +
+              esc(v.zone || "\u2014") +
+              "</td>" +
+              "<td><code>" +
+              esc(v.vm_sku) +
+              "</code></td>" +
+              '<td style="text-align:right">' +
+              (v.vcpus != null ? v.vcpus : "\u2014") +
+              "</td>" +
+              '<td style="text-align:right">' +
+              (v.memory_gb != null ? v.memory_gb : "\u2014") +
+              "</td>" +
+              "<td>" +
+              badgeState(v.power_state) +
+              "</td>" +
+              '<td style="font-size:12px">' +
+              esc(v.avset_vmss || "\u2014") +
+              "</td>" +
+              "<td>" +
+              pbarHtml(v.avg_cpu_pct) +
+              "</td>" +
+              "<td>" +
+              pbarHtml(v.p95_cpu_pct) +
+              "</td>" +
+              "<td>" +
+              pbarHtml(v.avg_mem_pct) +
+              "</td>" +
+              '<td style="text-align:right">' +
+              fmtNum(v.finding_count) +
+              "</td>" +
+              '<td style="text-align:right">' +
+              fmtNum(v.ready_count) +
+              "</td></tr>"
+            );
+          })
+          .join("");
+        tbody("pvm-body", rows);
+      }
+
+      // ── VM Insights ─────────────────────────────────────
+      function populateInsFilters() {
+        var sel = document.getElementById("ins-sub");
+        var cur = sel.value;
+        var base = sel.options[0].outerHTML;
+        var uniq = Array.from(
+          new Set(
+            vmInsightsData.map(function (v) {
+              return v.subscription_name;
+            }),
+          ),
+        )
+          .filter(Boolean)
+          .sort();
+        sel.innerHTML =
+          base +
+          uniq
+            .map(function (v) {
+              return '<option value="' + esc(v) + '">' + esc(v) + "</option>";
+            })
+            .join("");
+        if (cur) sel.value = cur;
+      }
+      function renderVmInsights() {
+        var sub = document.getElementById("ins-sub").value;
+        var q = (
+          document.getElementById("ins-search").value || ""
+        ).toLowerCase();
+        var items = vmInsightsData;
+        if (sub)
+          items = items.filter(function (v) {
+            return v.subscription_name === sub;
+          });
+        if (q)
+          items = items.filter(function (v) {
+            return (
+              v.vm_name.toLowerCase().indexOf(q) >= 0 ||
+              v.resource_group.toLowerCase().indexOf(q) >= 0
+            );
+          });
+        var banner = document.getElementById("ins-banner");
+        if (banner) {
+          if (!vmInsightsData.length) {
+            banner.innerHTML =
+              '<div class="info-banner">No VM metrics data found. Ensure the workbook was generated with <strong>cloudopt analyze</strong> from a JSON that includes performance data.</div>';
+          } else {
+            banner.innerHTML = "";
+          }
+        }
+        var cnt = document.getElementById("ins-count");
+        if (cnt) cnt.textContent = items.length + " VMs with metrics";
+        function fmtMbps(v) {
+          return v == null ? "\u2014" : v.toFixed(2);
+        }
+        var rows = items
+          .map(function (v) {
+            return (
+              "<tr><td><strong>" +
+              esc(v.vm_name) +
+              "</strong></td>" +
+              "<td>" +
+              esc(v.subscription_name) +
+              "</td>" +
+              "<td>" +
+              esc(v.resource_group) +
+              "</td>" +
+              "<td><code>" +
+              esc(v.vm_sku) +
+              "</code></td>" +
+              "<td>" +
+              pbarHtml(v.avg_cpu_pct) +
+              "</td>" +
+              "<td>" +
+              pbarHtml(v.p95_cpu_pct) +
+              "</td>" +
+              "<td>" +
+              pbarHtml(v.avg_mem_pct) +
+              "</td>" +
+              '<td style="text-align:right">' +
+              fmtMbps(v.disk_read_mbps) +
+              "</td>" +
+              '<td style="text-align:right">' +
+              fmtMbps(v.disk_write_mbps) +
+              "</td>" +
+              '<td style="text-align:right">' +
+              fmtMbps(v.net_in_mbps) +
+              "</td>" +
+              '<td style="text-align:right">' +
+              fmtMbps(v.net_out_mbps) +
+              "</td></tr>"
+            );
+          })
+          .join("");
+        tbody("ins-body", rows);
+      }
+
+      // ── Sortable tables ────────────────────────────────
+      function initAllSortable() {
+        document.querySelectorAll("#content table").forEach(function (table) {
+          var ths = table.querySelectorAll("thead th");
+          ths.forEach(function (th) {
+            if (th.dataset.nosort) return;
+            if (th._sortBound) return; // prevent double-binding
+            th._sortBound = true;
+            th.classList.add("sortable-col");
+            th.title = "Click to sort";
+            th.addEventListener("click", function () {
+              var asc = th.dataset.dir !== "asc";
+              ths.forEach(function (t) {
+                t.textContent = t.textContent
+                  .replace(/\s*[\u25b2\u25bc]\s*$/, "")
+                  .trim();
+                t.dataset.dir = "";
+              });
+              th.textContent = th.textContent + (asc ? " \u25b2" : " \u25bc");
+              th.dataset.dir = asc ? "asc" : "desc";
+              var tb = table.querySelector("tbody");
+              var rows = Array.prototype.slice.call(tb.rows);
+              rows.sort(function (a, b) {
+                var av = a.cells[Array.prototype.indexOf.call(ths, th)]
+                  ? a.cells[
+                      Array.prototype.indexOf.call(ths, th)
+                    ].innerText.trim()
+                  : "";
+                var bv = b.cells[Array.prototype.indexOf.call(ths, th)]
+                  ? b.cells[
+                      Array.prototype.indexOf.call(ths, th)
+                    ].innerText.trim()
+                  : "";
+                av = av.replace(/[,%\u2014\u2013]/g, "").trim();
+                bv = bv.replace(/[,%\u2014\u2013]/g, "").trim();
+                var an = parseFloat(av),
+                  bn = parseFloat(bv);
+                var isNum = !isNaN(an) && !isNaN(bn) && av !== "" && bv !== "";
+                var cmp = isNum
+                  ? an - bn
+                  : av.localeCompare(bv, undefined, { sensitivity: "base" });
+                return asc ? cmp : -cmp;
+              });
+              rows.forEach(function (r) {
+                tb.appendChild(r);
+              });
+            });
+          });
+        });
+      }
+
+      // ── Theme ──────────────────────────────────────────
+      function initTheme() {
+        var saved = localStorage.getItem("cloudopt_theme") || "system";
+        themeIdx = THEME_MODES.indexOf(saved);
+        if (themeIdx < 0) themeIdx = 0;
+        applyTheme();
+      }
+      function applyTheme() {
+        var mode = THEME_MODES[themeIdx];
+        var btn = document.getElementById("theme-toggle");
+        if (btn)
+          btn.textContent =
+            THEME_ICONS[mode] +
+            " " +
+            mode.charAt(0).toUpperCase() +
+            mode.slice(1);
+        if (mode === "system") {
+          document.documentElement.removeAttribute("data-theme");
+          if (
+            window.matchMedia &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches
+          ) {
+            document.documentElement.setAttribute("data-theme", "dark");
+          }
+        } else {
+          document.documentElement.setAttribute("data-theme", mode);
+        }
+      }
+      function toggleTheme() {
+        themeIdx = (themeIdx + 1) % THEME_MODES.length;
+        localStorage.setItem("cloudopt_theme", THEME_MODES[themeIdx]);
+        applyTheme();
+      }
+
+      // ── Keyboard navigation ────────────────────────────
+      var NAV_KEYS = [
+        "s-dashboard",
+        "s-findings",
+        "s-subs",
+        "s-rg",
+        "s-groups",
+        "s-perfvm",
+        "s-inventory",
+        "s-sku",
+        "s-quota",
+        "s-insights",
+      ];
+      document.addEventListener("keydown", function (e) {
+        if (
+          e.target.tagName === "INPUT" ||
+          e.target.tagName === "SELECT" ||
+          e.target.tagName === "TEXTAREA"
+        )
+          return;
+        if (e.altKey || e.ctrlKey || e.metaKey) return;
+        var idx = parseInt(e.key, 10) - 1;
+        if (!isNaN(idx) && idx >= 0 && idx < NAV_KEYS.length) {
+          var navEl = document.querySelector(
+            '[data-section="' + NAV_KEYS[idx] + '"]',
+          );
+          if (navEl) nav(navEl);
+        }
+      });
+
+      // ── Boot ───────────────────────────────────────────
+      initTheme();
+      loadAll();
     </script>
   </body>
 </html>
