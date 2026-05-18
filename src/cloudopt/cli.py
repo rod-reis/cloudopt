@@ -500,6 +500,10 @@ def collect(
         _confirm_or_exit()
         console.print()
 
+        # ── Thresholds (asked once, right after confirmation) ─────────────
+        console.print("[bold]Configure recommendation and quota thresholds.[/bold]")
+        thresholds = prompt_thresholds()
+
     # ── 3. VM Inventory ──────────────────────────────────────────────────
     console.print("[bold]Step 3:[/bold] Collecting VM inventory via Resource Graph…")
     _t = time.perf_counter()
@@ -517,12 +521,8 @@ def collect(
             )
         raise typer.Exit()
 
-    # ── 4. Thresholds ────────────────────────────────────────────────────
-    console.print("[bold]Step 4:[/bold] Configure recommendation and quota thresholds.")
-    thresholds = prompt_thresholds()
-
-    # ── 5. VM Metrics ────────────────────────────────────────────────────
-    console.print("[bold]Step 5:[/bold] Collecting VM performance metrics from Azure Monitor…")
+    # ── 4. VM Metrics ────────────────────────────────────────────────────
+    console.print("[bold]Step 4:[/bold] Collecting VM performance metrics from Azure Monitor…")
     console.print(
         "[dim]  Processing subscriptions sequentially; "
         f"batches of {eff_concurrency} VMs per subscription.[/dim]"
@@ -541,7 +541,7 @@ def collect(
     console.print(
         f"[green]✓[/green] Metrics collected for {len(all_metrics)} metric series.\n"
     )
-    _debug_time(debug, "Step 5: VM metrics", _t)
+    _debug_time(debug, "Step 4: VM metrics", _t)
 
     # ── 6. App Insights ──────────────────────────────────────────────────
     console.print("[bold]Step 6:[/bold] Collecting Application Insights inventory…")
