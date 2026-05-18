@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from cloudopt.export.excel import read_workbook, read_quota_from_workbook
+from cloudopt.export.excel import read_workbook, read_quota_from_workbook, read_vmss_groups_from_workbook
 from cloudopt.models import (
     CollectionMetadata,
     VmInventory,
@@ -37,6 +37,7 @@ _DATA: dict[str, Any] = {
     "deployment_failures": [],
     "findings": [],
     "source_coverage": [],
+    "vmss_groups": [],
 }
 
 
@@ -283,6 +284,7 @@ def _load_excel(path: Path) -> None:
     except Exception:
         findings = []
     _DATA["findings"] = findings
+    _DATA["vmss_groups"] = read_vmss_groups_from_workbook(path)
 
 
 def _load_json(path: Path) -> None:
@@ -347,6 +349,16 @@ def _load_json(path: Path) -> None:
         except Exception:
             pass
     _DATA["deployment_failures"] = depfail
+
+    # --- VMSS Uniform groups ---
+    from cloudopt.models import ManagedComputeGroupRow
+    vmss_groups: list[ManagedComputeGroupRow] = []
+    for d in raw.get("vmss_groups", []):
+        try:
+            vmss_groups.append(ManagedComputeGroupRow(**d))
+        except Exception:
+            pass
+    _DATA["vmss_groups"] = vmss_groups
 
     # --- Detector pipeline → Finding list --------------------------------
     from cloudopt.analyzer.detectors import run_all
@@ -646,10 +658,27 @@ def _aggregate_flat_groups(
             "vm_sku": sku,
             "vm_count": len(group_vms),
             "avg_cpu_pct": _avg_metric_group(group_vms, metrics_by_vm, "Percentage CPU", "avg"),
+            "p95_cpu_pct": _avg_metric_group(group_vms, metrics_by_vm, "Percentage CPU", "p95"),
             "avg_mem_pct": _avg_mem_pct_group(group_vms, metrics_by_vm),
             "finding_count": len(grp_findings),
             "ready_count": sum(1 for f in grp_findings if f.readiness == Readiness.READY),
         })
+
+    # Merge VMSS Uniform groups — these don't surface as individual VMs in ARG
+    for g in (_DATA.get("vmss_groups") or []):
+        result.append({
+            "subscription_name": g.subscription_name,
+            "resource_group": g.resource_group,
+            "group_name": g.vmss_name or g.parent_service_name or "(unknown)",
+            "group_type": "VMSS Uniform",
+            "vm_sku": g.vm_sku,
+            "vm_count": g.instance_count,
+            "avg_cpu_pct": g.avg_cpu_pct,
+            "p95_cpu_pct": g.p95_cpu_pct,
+            "avg_mem_pct": g.avg_mem_pct,
+        })
+
+    result.sort(key=lambda r: (r["subscription_name"], r["resource_group"], r["group_name"], r["vm_sku"]))
     return result
 
 

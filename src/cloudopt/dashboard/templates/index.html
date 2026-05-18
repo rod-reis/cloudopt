@@ -897,6 +897,7 @@
             <select id="grp-type-filter" onchange="renderGroups()">
               <option value="">All</option>
               <option value="VMSS">VMSS</option>
+              <option value="VMSS Uniform">VMSS Uniform</option>
               <option value="AvailabilitySet">Availability Set</option>
               <option value="None">Ungrouped</option>
             </select>
@@ -927,6 +928,7 @@
                     <th>SKU</th>
                     <th>VMs</th>
                     <th>Avg CPU %</th>
+                    <th>P95 CPU %</th>
                     <th>Avg Mem %</th>
                     <th>Findings</th>
                     <th>READY</th>
@@ -1960,6 +1962,8 @@
         if (cnt) cnt.textContent = items.length + " rows";
         function typeLabel(t) {
           if (t === "VMSS") return '<span class="badge badge-vmss">VMSS</span>';
+          if (t === "VMSS Uniform")
+            return '<span class="badge badge-vmss">VMSS\u00a0Uniform</span>';
           if (t === "AvailabilitySet")
             return '<span class="badge badge-avset">AvSet</span>';
           return '<span class="badge badge-none">\u2014</span>';
@@ -1984,6 +1988,8 @@
               "</td>" +
               "<td>" +
               pbarHtml(g.avg_cpu_pct) +
+              "</td><td>" +
+              pbarHtml(g.p95_cpu_pct) +
               "</td><td>" +
               pbarHtml(g.avg_mem_pct) +
               "</td>" +

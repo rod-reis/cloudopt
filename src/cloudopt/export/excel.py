@@ -248,6 +248,71 @@ def read_quota_from_workbook(path: Path) -> list[QuotaItem]:
     return _read_quota_sheet(wb)
 
 
+def read_vmss_groups_from_workbook(path: Path) -> list[ManagedComputeGroupRow]:
+    """Read VMSS Uniform groups from the 'Perf by VM Group' sheet.
+
+    Identifies Uniform VMSS rows by an empty 'Parent ResourceType' column,
+    which distinguishes them from AKS/AVD/etc. managed service rows.
+    """
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    ws = wb["Perf by VM Group"] if "Perf by VM Group" in wb.sheetnames else None
+    if ws is None:
+        return []
+
+    # Build header → column-index map from row 1
+    col_map: dict[str, int] = {}
+    for cell in next(ws.iter_rows(min_row=1, max_row=1)):
+        if cell.value:
+            col_map[str(cell.value)] = cell.column - 1  # zero-based offset
+
+    def _get(row_vals: list, header: str):
+        idx = col_map.get(header)
+        return row_vals[idx] if idx is not None and idx < len(row_vals) else None
+
+    def _float(v) -> float | None:
+        try:
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    def _int(v) -> int:
+        try:
+            return int(v) if v is not None else 0
+        except (TypeError, ValueError):
+            return 0
+
+    results: list[ManagedComputeGroupRow] = []
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        row_vals = list(row)
+        # Empty "Parent ResourceType" → VMSS Uniform (not a managed service)
+        parent_resource_type = _get(row_vals, "Parent ResourceType")
+        vmss_name = _get(row_vals, "VMSS Name")
+        if parent_resource_type or not vmss_name:
+            continue
+        try:
+            results.append(ManagedComputeGroupRow(
+                parent_service_type=ParentServiceType.STANDALONE_VMSS,
+                vmss_name=str(vmss_name),
+                parent_service_name=str(vmss_name),
+                vm_sku=str(_get(row_vals, "VM SKU") or ""),
+                instance_count=_int(_get(row_vals, "Instance Count")),
+                subscription_name=str(_get(row_vals, "Subscription") or ""),
+                subscription_id="",
+                resource_group=str(_get(row_vals, "Resource Group") or ""),
+                region=str(_get(row_vals, "Region") or ""),
+                os_type=str(_get(row_vals, "OS Type") or "") or None,
+                avg_cpu_pct=_float(_get(row_vals, "Avg CPU %")),
+                p95_cpu_pct=_float(_get(row_vals, "P95 CPU %")),
+                p99_cpu_pct=_float(_get(row_vals, "P99 CPU %")),
+                max_cpu_pct=_float(_get(row_vals, "Max CPU %")),
+                min_cpu_pct=_float(_get(row_vals, "Min CPU %")),
+                avg_mem_pct=_float(_get(row_vals, "Avg Mem %")),
+            ))
+        except Exception:
+            pass
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Sheet 1: Technical Summary  (Phase B)
 # ---------------------------------------------------------------------------
