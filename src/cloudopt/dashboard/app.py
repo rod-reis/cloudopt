@@ -512,7 +512,7 @@ def _build_overview(
     quota: list[Any],
 ) -> dict:
     from cloudopt.analyzer.taxonomy import Readiness, Confidence, Category
-    recs = [f for f in findings if f.finding_type.value == "RECOMMENDATION"]
+    recs = [f for f in findings if f.finding_type.value == "recommendation"]
     by_cat: dict[str, dict] = {}
     for cat in Category:
         cat_recs = [f for f in recs if f.category == cat]

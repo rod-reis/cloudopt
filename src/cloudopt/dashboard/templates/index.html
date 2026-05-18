@@ -750,8 +750,8 @@
             <label>Type</label>
             <select id="f-type" onchange="renderFindings()">
               <option value="">All</option>
-              <option value="RECOMMENDATION">Recommendation</option>
-              <option value="CANDIDATE">Candidate</option>
+              <option value="recommendation">Recommendation</option>
+              <option value="candidate">Candidate</option>
             </select>
             <label>Category</label>
             <select id="f-cat" onchange="renderFindings()">
@@ -1688,7 +1688,7 @@
         var ready = findings
           .filter(function (f) {
             return (
-              f.readiness === "READY" && f.finding_type === "RECOMMENDATION"
+              f.readiness === "READY" && f.finding_type === "recommendation"
             );
           })
           .slice(0, 15);
