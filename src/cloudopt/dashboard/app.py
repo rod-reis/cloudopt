@@ -50,21 +50,27 @@ def _build_waterfall(vms, findings):
     """Return vCPU waterfall data for the Capacity Recovery chart."""
     from cloudopt.analyzer.taxonomy import Readiness, Category
     total_running_vcpu = sum(v.vcpus for v in vms if not _is_stopped(v))
+    vms_by_id = {v.resource_id: v for v in vms}
 
     ready_recs = [f for f in findings if f.readiness == Readiness.READY and f.finding_type.value == "recommendation"]
 
+    # Downsize: deltas["vcpu"] is negative (proposed − current for a smaller SKU)
     downsize_vcpu = sum(
         abs(f.deltas.get("vcpu", 0) or 0)
         for f in ready_recs
         if f.category == Category.RIGHTSIZE and f.proposed
-        and (f.deltas.get("vcpu", 0) or 0) < 0
+        and f.deltas and (f.deltas.get("vcpu", 0) or 0) < 0
     )
 
-    decom_vcpu = sum(
-        abs(f.deltas.get("vcpu", 0) or 0)
-        for f in ready_recs
-        if f.category == Category.DECOM
-    )
+    # Decom: use VM's current vcpu since decom findings don't carry a delta
+    seen_decom = set()
+    decom_vcpu = 0
+    for f in ready_recs:
+        if f.category == Category.DECOM and f.vm_id not in seen_decom:
+            seen_decom.add(f.vm_id)
+            vm = vms_by_id.get(f.vm_id)
+            if vm:
+                decom_vcpu += vm.vcpus
 
     return {
         "current_vcpu": total_running_vcpu,
@@ -723,6 +729,15 @@ def _build_overview(
         for f in ready_recs
         if f.deltas and (f.deltas.get("vcpu", 0) or 0) < 0
     )
+    # Add decom vcpu (decom findings don't carry vcpu delta — use VM inventory)
+    vms_by_id = {v.resource_id: v for v in vms}
+    seen_decom: set = set()
+    for f in ready_recs:
+        if f.category == Category.DECOM and f.vm_id not in seen_decom:
+            seen_decom.add(f.vm_id)
+            vm = vms_by_id.get(f.vm_id)
+            if vm:
+                vcpu_opportunity += vm.vcpus
 
     generation_gap_count = sum(1 for f in recs if f.code.startswith("SWP-GEN-"))
 

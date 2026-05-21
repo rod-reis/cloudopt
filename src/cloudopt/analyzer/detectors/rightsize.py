@@ -326,6 +326,8 @@ def _make_rsz_finding(
     )
 
     # Material-change filter: suppress trivially small downsizes
+    vcpu_reduction = None
+    mem_reduction_gb = None
     if proposed_sku and thresholds and catalog:
         representative_vm = group.members[0]
         current_spec = catalog.get(representative_vm.subscription_id, representative_vm.region, current_sku)
@@ -338,10 +340,19 @@ def _make_rsz_finding(
                 and mem_delta_gb < thresholds.material_change_min_mem_delta_gb
             ):
                 return None
+            # Store deltas so dashboard can compute capacity recovery
+            # Sign convention: negative = capacity freed by this action (downsize = negative)
+            vcpu_reduction = proposed_spec.vcpus - current_spec.vcpus  # negative for downsize
+            mem_reduction_gb = proposed_spec.memory_gb - current_spec.memory_gb
 
     kwargs = _rec_kwargs(enriched=enriched, category=Category.RIGHTSIZE)
-    if signal:
-        kwargs["deltas"] = {"signal": signal}
+    deltas: dict = {"signal": signal} if signal else {}
+    if vcpu_reduction is not None:
+        deltas["vcpu"] = vcpu_reduction
+    if mem_reduction_gb is not None:
+        deltas["ram_gb"] = mem_reduction_gb
+    if deltas:
+        kwargs["deltas"] = deltas
     return Finding(
         vm_id=vm_id,
         category=Category.RIGHTSIZE,

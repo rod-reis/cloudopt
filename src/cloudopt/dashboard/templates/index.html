@@ -740,7 +740,7 @@
           <!-- Row 2: Charts -->
           <div class="chart-row wide">
             <div class="chart-card">
-              <h3>Savings Waterfall</h3>
+              <h3>Capacity Recovery Waterfall</h3>
               <canvas id="chart-waterfall"></canvas>
             </div>
             <div class="chart-card">
@@ -1373,7 +1373,7 @@
         crg = [],
         depFail = [];
       var overview = {};
-      var waterfallData = [], archetypesData = [], hygieneData = {}, quickWinsData = [];
+      var waterfallData = {}, archetypesData = {distribution:{},vms:[]}, hygieneData = [], quickWinsData = [];
       var findingsStatus = {};
       var meta = {};
       var perVmData = [],
@@ -1635,9 +1635,9 @@
         meta = results[10];
         perVmData = results[11] || [];
         vmInsightsData = results[12] || [];
-        waterfallData = results[13] || [];
-        archetypesData = results[14] || [];
-        hygieneData = results[15] || {};
+        waterfallData = results[13] || {};
+        archetypesData = results[14] || {distribution:{},vms:[]};
+        hygieneData = results[15] || [];
         quickWinsData = results[16] || [];
         findingsStatus = results[17] || {};
         renderAll();
@@ -1782,7 +1782,7 @@
 
       function scoreBadge(score) {
         if (score == null) return "\u2014";
-        var cls = score >= 75 ? "score-high" : score >= 40 ? "score-med" : "score-low";
+        var cls = score >= 80 ? "score-high" : score >= 50 ? "score-med" : "score-low";
         return '<span class="score-badge ' + cls + '">' + score + "</span>";
       }
 
@@ -1792,9 +1792,16 @@
         var ctx = document.getElementById("chart-waterfall");
         if (!ctx) return;
         if (chartWaterfall) chartWaterfall.destroy();
-        var labels = waterfallData.map(function (d) { return d.label; });
-        var vals   = waterfallData.map(function (d) { return d.value; });
-        var colors = vals.map(function (v) { return v >= 0 ? "#38a169" : "#e53e3e"; });
+        var d = waterfallData;
+        if (!d || !d.current_vcpu) {
+          ctx.parentElement.innerHTML += '<p style="color:var(--muted);font-size:13px;margin-top:8px;">No capacity recovery data available.</p>';
+          return;
+        }
+        var afterDownsize = d.current_vcpu - (d.downsize_recovery || 0);
+        var afterDecom    = afterDownsize - (d.decom_recovery || 0);
+        var labels = ["Current Total", "After Downsizes", "After Decommission", "Target Remaining"];
+        var vals   = [d.current_vcpu, afterDownsize, afterDecom, d.remaining || afterDecom];
+        var colors = ["#3182ce", "#38a169", "#38a169", "#718096"];
         chartWaterfall = new Chart(ctx.getContext("2d"), {
           type: "bar",
           data: {
@@ -1804,7 +1811,7 @@
           options: {
             responsive: true,
             plugins: { legend: { display: false } },
-            scales: { y: { beginAtZero: true } }
+            scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
           }
         });
       }
@@ -1814,13 +1821,17 @@
         if (!ctx) return;
         if (chartConfidenceHist) chartConfidenceHist.destroy();
         var hist = overview.confidence_histogram || {};
-        var labels = ["0-24", "25-49", "50-74", "75-100"];
-        var data   = [hist["0-24"] || 0, hist["25-49"] || 0, hist["50-74"] || 0, hist["75-100"] || 0];
+        var labels = ["0-10","10-20","20-30","30-40","40-50","50-60","60-70","70-80","80-90","90-100"];
+        var data   = labels.map(function (k) { return hist[k] || 0; });
+        var colors = labels.map(function (k) {
+          var lo = parseInt(k, 10);
+          return lo >= 80 ? "#38a169" : lo >= 50 ? "#d69e2e" : "#e53e3e";
+        });
         chartConfidenceHist = new Chart(ctx.getContext("2d"), {
           type: "bar",
           data: {
             labels: labels,
-            datasets: [{ label: "Findings", data: data, backgroundColor: "#3182ce", borderWidth: 0 }]
+            datasets: [{ label: "Findings", data: data, backgroundColor: colors, borderWidth: 0 }]
           },
           options: {
             responsive: true,
@@ -1833,26 +1844,33 @@
       function renderHygiene() {
         var el = document.getElementById("hygiene-grid");
         if (!el) return;
-        var checks = [
-          { key: "has_stopped_vms",     label: "No Stopped VMs",      invert: true },
-          { key: "has_old_gen_vms",      label: "No Old-Gen VMs",      invert: true },
-          { key: "has_unattached_disks", label: "No Unattached Disks", invert: true },
-          { key: "has_oversized_vms",    label: "No Oversized VMs",    invert: true },
-          { key: "all_monitored",        label: "All VMs Monitored",   invert: false },
-          { key: "crr_configured",       label: "CRR Configured",      invert: false },
-        ];
-        var html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;">';
-        checks.forEach(function (c) {
-          var raw = hygieneData[c.key];
-          var pass = c.invert ? !raw : !!raw;
-          var pill = raw == null
-            ? '<span class="pill-na">N/A</span>'
-            : (pass ? '<span class="pill-pass">PASS</span>' : '<span class="pill-fail">FAIL</span>');
-          html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border:1px solid var(--border);border-radius:6px;">'
-               + '<span style="font-size:12px;">' + esc(c.label) + "</span>"
-               + pill + "</div>";
+        var rows = Array.isArray(hygieneData) ? hygieneData : [];
+        if (!rows.length) {
+          el.innerHTML = '<p style="color:var(--muted);font-size:13px;">No capacity monitoring data. Run <code>cloudopt collect</code> with alert collection enabled.</p>';
+          return;
+        }
+        var colLabels = ["Quota Alert", "Alloc Failure", "Quota Exceeded", "CRR Alert", "Service Health"];
+        var colKeys   = ["a", "b", "c", "d", "e"];
+        var html = '<table style="width:100%;border-collapse:collapse;font-size:12px;">';
+        html += "<thead><tr>"
+          + '<th style="text-align:left;padding:4px 6px;border-bottom:1px solid var(--border)">Subscription</th>';
+        colLabels.forEach(function (l) {
+          html += '<th style="text-align:center;padding:4px 6px;border-bottom:1px solid var(--border)">' + esc(l) + "</th>";
         });
-        html += "</div>";
+        html += "</tr></thead><tbody>";
+        rows.forEach(function (row) {
+          html += "<tr>"
+            + '<td style="padding:4px 6px;font-size:11px;color:var(--muted)">' + esc(row.subscription || "") + "</td>";
+          colKeys.forEach(function (k) {
+            var v = row[k];
+            var cell = v == null
+              ? '<span class="pill-na">N/A</span>'
+              : (v ? '<span class="pill-pass">✓ OK</span>' : '<span class="pill-fail">✗ Missing</span>');
+            html += '<td style="text-align:center;padding:4px 6px">' + cell + "</td>";
+          });
+          html += "</tr>";
+        });
+        html += "</tbody></table>";
         el.innerHTML = html;
       }
 
@@ -1874,36 +1892,49 @@
 
       function renderArchetypes() {
         var cardsEl = document.getElementById("archetypes-cards");
+        var dist = (archetypesData && archetypesData.distribution) || {};
+        var archList = Object.keys(dist).map(function (k) { return { archetype: k, vm_count: dist[k] }; });
+        archList.sort(function (a, b) { return b.vm_count - a.vm_count; });
         if (cardsEl) {
-          if (!archetypesData.length) {
-            cardsEl.innerHTML = '<p style="color:var(--muted);font-size:13px;">No archetype data available.</p>';
+          if (!archList.length) {
+            cardsEl.innerHTML = '<p style="color:var(--muted);font-size:13px;">No archetype data available. Run <code>cloudopt collect</code> with metrics enabled.</p>';
           } else {
             var html = '<div class="kpi-grid">';
-            archetypesData.forEach(function (a) {
+            archList.forEach(function (a) {
               html += '<div class="kpi-card">'
                    + '<div class="kpi-label"><span class="arch-badge">' + esc(a.archetype) + "</span></div>"
                    + '<div class="kpi-value">' + fmtNum(a.vm_count) + " VMs</div>"
-                   + '<div class="kpi-sub">' + esc(a.primary_recommendation || "") + "</div>"
                    + "</div>";
             });
             html += "</div>";
             cardsEl.innerHTML = html;
           }
         }
-        renderArchetypesTable();
+        renderArchetypesTable(archList);
       }
 
-      function renderArchetypesTable() {
-        var rows = archetypesData.map(function (a) {
+      function renderArchetypesTable(archList) {
+        var vmList = (archetypesData && archetypesData.vms) || [];
+        var rows = vmList.map(function (vm) {
           return "<tr>"
-            + "<td><span class='arch-badge'>" + esc(a.archetype) + "</span></td>"
-            + "<td>" + fmtNum(a.vm_count) + "</td>"
-            + "<td>" + (a.avg_cpu_pct != null ? a.avg_cpu_pct.toFixed(1) + "%" : "\u2014") + "</td>"
-            + "<td>" + (a.avg_mem_pct != null ? a.avg_mem_pct.toFixed(1) + "%" : "\u2014") + "</td>"
-            + "<td>" + scoreBadge(a.avg_score != null ? Math.round(a.avg_score) : null) + "</td>"
-            + "<td>" + esc(a.primary_recommendation || "\u2014") + "</td>"
+            + "<td><span class='arch-badge'>" + esc(vm.archetype || "unknown") + "</span></td>"
+            + "<td>" + esc(vm.vm_name || vm.vm_id || "\u2014") + "</td>"
+            + "<td>" + esc(vm.vm_sku || "\u2014") + "</td>"
+            + "<td>" + (vm.vcpus != null ? vm.vcpus : "\u2014") + "</td>"
+            + "<td>\u2014</td>"
+            + "<td>" + esc(vm.inferred_role || "\u2014") + "</td>"
             + "</tr>";
         }).join("");
+        // Fall back to archetype summary rows if no VM detail
+        if (!rows && archList && archList.length) {
+          rows = archList.map(function (a) {
+            return "<tr>"
+              + "<td><span class='arch-badge'>" + esc(a.archetype) + "</span></td>"
+              + "<td colspan='4'>" + fmtNum(a.vm_count) + " VMs</td>"
+              + "<td>\u2014</td>"
+              + "</tr>";
+          }).join("");
+        }
         tbody("archetypes-body", rows);
       }
 
@@ -1955,10 +1986,10 @@
         var owner = prompt("Owner (optional):", cur.owner || "");
         var due   = prompt("Due date YYYY-MM-DD (optional):", cur.due_date || "");
         var notes = prompt("Notes (optional):", cur.notes || "");
-        fetch("/api/findings-status", {
+        fetch("/api/findings-status/" + encodeURIComponent(key).replace(/%2F/g, "/"), {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ finding_id: key, status: newStatus, owner: owner || "", due_date: due || "", notes: notes || "" })
+          body: JSON.stringify({ status: newStatus, owner: owner || "", due_date: due || "", notes: notes || "" })
         }).then(function (r) { return r.json(); }).then(function (updated) {
           findingsStatus = updated;
           renderActionPlan(_apFilter);
