@@ -200,6 +200,7 @@ CANONICAL_TO_GUEST_FIELD: dict[str, str] = {
 
 KNOWN_SOURCE_TOOLS: frozenset[str] = frozenset({
     "datadog", "splunk", "dynatrace", "newrelic", "elastic", "prometheus", "custom",
+    "ama", "vminsights-classic",
 })
 
 

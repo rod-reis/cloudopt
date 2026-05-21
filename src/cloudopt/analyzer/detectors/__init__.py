@@ -31,6 +31,7 @@ from cloudopt.analyzer.detectors import (
     swap,
     upsize,
 )
+from cloudopt.analyzer.detectors._shared import enrich_vm_memory_quality
 from cloudopt.analyzer.sku_catalog import SkuCatalog
 from cloudopt.enrichment.schema import EnrichedVmMetrics
 from cloudopt.models import (
@@ -75,6 +76,8 @@ def run_all(
         crg_items:             Optional Capacity Reservation Groups (§2.6 detectors).
     """
     out: list[Finding] = []
+    # Phase 3: populate memory_quality, mem_pressure_score per VM before detectors run
+    enrich_vm_memory_quality(vms, metrics, enriched_map=enriched_map)
     out.extend(rightsize.detect(vms, metrics, quota_items, thresholds, catalog, enriched_map=enriched_map))
     out.extend(burstable.detect(vms, metrics, quota_items, thresholds, catalog, enriched_map=enriched_map))
     out.extend(diskless.detect(vms, metrics, quota_items, thresholds, catalog, enriched_map=enriched_map))

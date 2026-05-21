@@ -34,6 +34,7 @@ from cloudopt.enrichment.schema import EnrichedVmMetrics, MonitoringConfidence
 from cloudopt.models import (
     CollectionThresholds,
     Finding,
+    MemoryQuality,
     QuotaItem,
     VmInventory,
     VmMetrics,
@@ -74,8 +75,16 @@ def _evaluate(
     if group_enriched is None:
         return None
 
-    # Require OS-level data — platform-only confidence is insufficient
-    if group_enriched.confidence_tier == MonitoringConfidence.PLATFORM_ONLY:
+    # Require OS-level memory quality per SPEC §3.3:
+    # Accept ama, vminsights-classic, customer — reject platform-only and missing.
+    # When memory_quality is still MISSING (enrich_vm_memory_quality not called yet),
+    # fall back to the enrichment confidence tier for backward compatibility.
+    rep_vm = group.members[0]
+    os_quality_set = {MemoryQuality.AMA, MemoryQuality.VMINSIGHTS_CLASSIC, MemoryQuality.CUSTOMER}
+    if rep_vm.memory_quality is not MemoryQuality.MISSING:
+        if rep_vm.memory_quality not in os_quality_set:
+            return None
+    elif group_enriched.confidence_tier == MonitoringConfidence.PLATFORM_ONLY:
         return None
 
     # Try SPEC §7.4 canonical name first, then the legacy alias

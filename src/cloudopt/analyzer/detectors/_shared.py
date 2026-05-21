@@ -19,6 +19,7 @@ from cloudopt.analyzer.taxonomy import (
 )
 from cloudopt.enrichment.schema import EnrichedVmMetrics, MonitoringConfidence
 from cloudopt.models import (
+    MemoryQuality,
     VmInventory,
     VmMetrics,
 )
@@ -507,3 +508,95 @@ def _bseries_credits_sufficient(
     """
     baseline = _bseries_baseline_pct(vcpus)
     return cpu_avg_pct < baseline
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 — Memory quality helpers (SPEC §3.2 / §3.3)
+# ---------------------------------------------------------------------------
+
+_AMA_TOOL = "ama"
+_VMINSIGHTS_CLASSIC_TOOL = "vminsights-classic"
+
+
+def _resolve_memory_quality(
+    vm: VmInventory,
+    vm_met: dict[str, VmMetrics],
+    enriched: Optional[EnrichedVmMetrics],
+) -> MemoryQuality:
+    """Determine memory data quality per SPEC §3.3 source priority.
+
+    Priority (highest → lowest): ama > vminsights-classic > customer > platform.
+    Returns MISSING when no memory data is available at all.
+    """
+    if enriched is not None and enriched.has_os_data:
+        tool = enriched.source_tool.lower()
+        if tool == _AMA_TOOL:
+            return MemoryQuality.AMA
+        if tool == _VMINSIGHTS_CLASSIC_TOOL:
+            return MemoryQuality.VMINSIGHTS_CLASSIC
+        return MemoryQuality.CUSTOMER
+    if _stat(vm_met, "Available Memory Bytes", "avg") is not None:
+        return MemoryQuality.PLATFORM
+    return MemoryQuality.MISSING
+
+
+def _compute_mem_pressure_score(
+    vm: VmInventory,
+    vm_met: dict[str, VmMetrics],
+) -> Optional[float]:
+    """Return mem_pressure_score = 1 − (available_min_bytes / total_memory_bytes).
+
+    Uses the *minimum* of ``Available Memory Bytes`` as the worst-case memory
+    pressure indicator.  Clamped to [0.0, 1.0].  Returns None when the metric
+    or VM memory spec is unavailable.
+    """
+    avail_min = _stat(vm_met, "Available Memory Bytes", "min")
+    if avail_min is None or vm.memory_gb <= 0:
+        return None
+    total_bytes = vm.memory_gb * (1024 ** 3)
+    pressure = 1.0 - (avail_min / total_bytes)
+    return max(0.0, min(1.0, pressure))
+
+
+def _compute_memory_disagreement(
+    vm: VmInventory,
+    vm_met: dict[str, VmMetrics],
+    enriched: Optional[EnrichedVmMetrics],
+) -> Optional[float]:
+    """Return |platform_mem_pct − customer_mem_pct| when it exceeds 10 %, else None.
+
+    Used to flag potential data-quality issues when two sources disagree on
+    memory utilisation by more than the 10 % threshold defined in SPEC §3.3.
+    """
+    if enriched is None:
+        return None
+    os_dp = enriched.get("os.memory.used_percent")
+    if os_dp is None or os_dp.avg_value is None:
+        return None
+    avail_avg = _stat(vm_met, "Available Memory Bytes", "avg")
+    platform_pct = _mem_utilization_pct(avail_avg, vm.memory_gb)
+    if platform_pct is None:
+        return None
+    diff = abs(platform_pct - os_dp.avg_value)
+    return diff if diff > 10.0 else None
+
+
+def enrich_vm_memory_quality(
+    vms: list[VmInventory],
+    metrics: list[VmMetrics],
+    enriched_map: Optional[dict[str, EnrichedVmMetrics]] = None,
+) -> None:
+    """Populate memory_quality, mem_pressure_score, memory_disagreement_pct on each VM.
+
+    Mutates each VmInventory in place.  Must be called before running detectors
+    so that ``memory_quality`` is available for gating and confidence scoring.
+    """
+    metrics_by_vm = _group_metrics(metrics)
+    for vm in vms:
+        vm_met = metrics_by_vm.get(vm.resource_id, {})
+        enriched = enriched_map.get(vm.vm_name) if enriched_map else None
+        if enriched is None and enriched_map:
+            enriched = enriched_map.get(vm.resource_id)
+        vm.memory_quality = _resolve_memory_quality(vm, vm_met, enriched)
+        vm.mem_pressure_score = _compute_mem_pressure_score(vm, vm_met)
+        vm.memory_disagreement_pct = _compute_memory_disagreement(vm, vm_met, enriched)

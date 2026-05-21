@@ -116,6 +116,23 @@ class CollectionThresholds(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Memory quality
+# ---------------------------------------------------------------------------
+
+class MemoryQuality(str, Enum):
+    """Source quality of memory measurement data per SPEC §3.3 source priority.
+
+    Ordered by ascending reliability:
+      ama > vminsights-classic > customer > platform > missing
+    """
+    MISSING = "missing"                    # No memory metrics collected
+    PLATFORM = "platform"                  # Azure Monitor "Available Memory Bytes" proxy
+    CUSTOMER = "customer"                  # Customer-supplied OS-agent CSV
+    VMINSIGHTS_CLASSIC = "vminsights-classic"  # VM Insights (classic) via Log Analytics
+    AMA = "ama"                            # Azure Monitor Agent (highest fidelity)
+
+
+# ---------------------------------------------------------------------------
 # Managed-compute parentage
 # ---------------------------------------------------------------------------
 
@@ -186,6 +203,11 @@ class VmInventory(BaseModel):
     criticality: Optional[str] = None
     owner: Optional[str] = None
     custom: Optional[str] = None
+
+    # Memory quality and pressure (populated at analysis time — Phase 3 §3.1)
+    memory_quality: MemoryQuality = MemoryQuality.MISSING
+    mem_pressure_score: Optional[float] = None   # 1 − (available_min_bytes / total_memory_bytes)
+    memory_disagreement_pct: Optional[float] = None  # |platform% − customer%| when > 10 %
 
     # Full ``properties`` payload as returned by Azure Resource Graph for the
     # resources table.  Stored verbatim so consumers have access to every
