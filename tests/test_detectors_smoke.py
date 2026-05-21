@@ -37,6 +37,9 @@ def _metrics(vm: VmInventory) -> list[VmMetrics]:
 def _catalog_smaller() -> SkuCatalog:
     cat = MagicMock(spec=SkuCatalog)
     cat.find_smaller_sku.return_value = "Standard_D2s_v5"
+    cat.get.return_value = None
+    cat.find_newer_generation_sku.return_value = None
+    cat.find_arm64_equivalent_sku.return_value = None
     return cat
 
 

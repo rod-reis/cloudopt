@@ -609,6 +609,7 @@ _DECISIONS_COLS: list[tuple[str, int]] = [
     ("ResourceID",            52),
     ("Readiness",             14),
     ("Confidence",            14),
+    ("Score",                  8),
     ("Evidence Sources",      30),
     ("Current",               22),
     ("Proposed",              22),
@@ -646,6 +647,7 @@ def _sheet_decisions(
             vm_display,
             f.readiness.value,
             f.confidence.value if f.confidence else "",
+            f.confidence_score if f.confidence_score is not None else "",
             " | ".join(f.evidence_sources),
             f.current or "",
             f.proposed or "",
@@ -658,13 +660,18 @@ def _sheet_decisions(
             cell.border = _THIN_BORDER
             cell.font = Font(size=9)
             cell.alignment = Alignment(vertical="top", wrap_text=False)
-            # Colour-code Status col (4), Readiness col (6), Confidence col (7)
+            # Colour-code Status col (4), Readiness col (6), Confidence col (7), Score col (8)
             if col_idx == 4:
                 cell.fill = _CSA_FILL
             elif col_idx == 6:
                 cell.fill = _READINESS_FILL_MAP.get(f.readiness.value, PatternFill())
             elif col_idx == 7 and f.confidence:
                 cell.fill = _CONFIDENCE_FILL_MAP.get(f.confidence.value, PatternFill())
+            elif col_idx == 8 and isinstance(val, int):
+                # Tint the score cell with the same colour as the confidence band
+                if f.confidence:
+                    cell.fill = _CONFIDENCE_FILL_MAP.get(f.confidence.value, PatternFill())
+                cell.font = Font(size=9, bold=True)
             elif alt:
                 cell.fill = _ALT_FILL
 

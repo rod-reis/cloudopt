@@ -77,6 +77,9 @@ def _catalog_with(smaller_sku="Standard_D2s_v5", vcpus=2, memory_gb=8.0):
         return None
     catalog.get.side_effect = get_impl
     catalog.find_smaller_sku.return_value = smaller_sku  # string SKU name
+    catalog.find_newer_generation_sku.return_value = None  # no gen-swap candidate
+    catalog.find_arm64_equivalent_sku.return_value = None  # no arm64 candidate
+    catalog.find_larger_sku.return_value = None  # no upsize candidate
     return catalog
 
 
@@ -148,31 +151,31 @@ class TestRightSizeRule:
 # ---------------------------------------------------------------------------
 
 class TestPaasRule:
+    def _make_catalog(self) -> MagicMock:
+        cat = MagicMock(spec=SkuCatalog)
+        cat.find_smaller_sku.return_value = None
+        cat.find_newer_generation_sku.return_value = None
+        cat.find_arm64_equivalent_sku.return_value = None
+        return cat
+
     def test_flags_low_cpu_and_low_iops(self):
         vm = _vm()
-        # avg CPU < 10 (default), disk IOPS < 50
         metrics = _metrics_for(vm, cpu_avg=5.0, disk_iops=20.0)
-        catalog = MagicMock(spec=SkuCatalog)
-        catalog.find_smaller_sku.return_value = None  # prevent right-size from triggering
-        recs = generate_recommendations([vm], metrics, CollectionThresholds(), catalog)
+        recs = generate_recommendations([vm], metrics, CollectionThresholds(), self._make_catalog())
         subs = [r.subcategory for r in recs]
         assert PAAS_CANDIDATE not in subs  # PaaS detection removed per SPEC §13
 
     def test_no_flag_high_cpu(self):
         vm = _vm()
         metrics = _metrics_for(vm, cpu_avg=15.0, disk_iops=20.0)
-        catalog = MagicMock(spec=SkuCatalog)
-        catalog.find_smaller_sku.return_value = None
-        recs = generate_recommendations([vm], metrics, CollectionThresholds(), catalog)
+        recs = generate_recommendations([vm], metrics, CollectionThresholds(), self._make_catalog())
         subs = [r.subcategory for r in recs]
         assert PAAS_CANDIDATE not in subs
 
     def test_no_flag_high_iops(self):
         vm = _vm()
         metrics = _metrics_for(vm, cpu_avg=5.0, disk_iops=200.0)
-        catalog = MagicMock(spec=SkuCatalog)
-        catalog.find_smaller_sku.return_value = None
-        recs = generate_recommendations([vm], metrics, CollectionThresholds(), catalog)
+        recs = generate_recommendations([vm], metrics, CollectionThresholds(), self._make_catalog())
         subs = [r.subcategory for r in recs]
         assert PAAS_CANDIDATE not in subs
 
@@ -185,6 +188,8 @@ class TestEdgeCases:
     def test_no_metrics_returns_empty(self):
         vm = _vm(zone=None, avset=None)
         catalog = MagicMock(spec=SkuCatalog)
+        catalog.find_newer_generation_sku.return_value = None
+        catalog.find_arm64_equivalent_sku.return_value = None
         recs = generate_recommendations([vm], [], CollectionThresholds(), catalog)
         # Metric-dependent rules (underutilized, right-size) must not fire with no metrics.
         # Metadata-only rules (e.g. SWP-ARC-001) may still fire.

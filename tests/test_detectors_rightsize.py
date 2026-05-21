@@ -34,6 +34,7 @@ def _met(vm: VmInventory, metric: str, avg: float | None = None, p95: float | No
 def _catalog(smaller: str | None = "Standard_D2s_v5") -> SkuCatalog:
     cat = MagicMock(spec=SkuCatalog)
     cat.find_smaller_sku.return_value = smaller
+    cat.get.return_value = None  # skip material-change filter
     return cat
 
 
@@ -165,8 +166,9 @@ class TestRszNetworkSuppression:
             _met(vm, "Network Out Total", avg=1024),  # negligible bytes per interval
         ]
         cat = _catalog("Standard_D2s_v5")
-        spec = SkuSpec(vcpus=4, memory_gb=16.0, network_bandwidth_mbps=1000.0, accelerated_networking=True)
-        cat.get = lambda sub, region, sku: spec  # type: ignore[assignment]
+        current_spec = SkuSpec(vcpus=4, memory_gb=16.0, network_bandwidth_mbps=1000.0, accelerated_networking=True)
+        proposed_spec = SkuSpec(vcpus=2, memory_gb=8.0, network_bandwidth_mbps=500.0, accelerated_networking=True)
+        cat.get = lambda sub, region, sku: current_spec if sku == "Standard_D4s_v5" else proposed_spec  # type: ignore[assignment]
         findings = rightsize.detect([vm], metrics, [], _THRESHOLDS, cat)
         assert any(f.code == "RSZ-DWN-001" for f in findings)
 

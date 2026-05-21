@@ -221,6 +221,8 @@ class TestLegacySkuFilter:
         catalog = MagicMock(spec=SkuCatalog)
         catalog.find_smaller_sku.return_value = "Standard_D4s_v3"  # legacy
         catalog.get.return_value = SkuSpec(vcpus=4, memory_gb=16.0)
+        catalog.find_newer_generation_sku.return_value = None
+        catalog.find_arm64_equivalent_sku.return_value = None
         recs = generate_recommendations([vm], metrics, CollectionThresholds(), catalog)
         # The right-size rule must drop the legacy SKU and emit nothing.
         right_size = [r for r in recs if r.subcategory == Cat.RIGHT_SIZE]
@@ -293,6 +295,8 @@ def _make_deallocated_vm() -> VmInventory:
 class TestResourceCleanup:
     def test_deallocated_vm_emits_cleanup_rec(self):
         catalog = MagicMock(spec=SkuCatalog)
+        catalog.find_newer_generation_sku.return_value = None
+        catalog.find_arm64_equivalent_sku.return_value = None
         vm = _make_deallocated_vm()
         recs = generate_recommendations([vm], [], CollectionThresholds(), catalog)
         cleanup = [r for r in recs if r.category == Cat.RESOURCE_CLEANUP]
@@ -304,6 +308,8 @@ class TestResourceCleanup:
     def test_running_vm_does_not_emit_cleanup_rec(self):
         catalog = MagicMock(spec=SkuCatalog)
         catalog.find_smaller_sku.return_value = None
+        catalog.find_newer_generation_sku.return_value = None
+        catalog.find_arm64_equivalent_sku.return_value = None
         vm = VmInventory(
             vm_name="running-vm",
             subscription_id="aaaa-1111-1111-1111-111111111111",

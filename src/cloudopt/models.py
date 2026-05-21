@@ -691,6 +691,7 @@ class Finding(BaseModel):
     deltas: dict = Field(default_factory=dict)             # vcpu, ram_gb, gen_gap …
     evidence_sources: list[str] = Field(default_factory=list)
     confidence: Optional[Confidence] = None                # null for candidates
+    confidence_score: Optional[int] = None                 # 0–100 numeric score
     readiness: Readiness
     blockers_to_high: list[str] = Field(default_factory=list)
     customer_inputs_needed: list[str] = Field(default_factory=list)

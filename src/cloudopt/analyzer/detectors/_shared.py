@@ -27,20 +27,41 @@ from cloudopt.models import (
 def _rec_kwargs(
     enriched: Optional[EnrichedVmMetrics] = None,
     category: Optional[Category] = None,
+    code: Optional[str] = None,
+    *,
+    coverage_pct: Optional[float] = None,
+    stability_cv: Optional[float] = None,
+    corroboration_sources: int = 0,
+    high_change_impact: bool = False,
 ) -> dict:
     """Return confidence-scored keyword defaults for a RECOMMENDATION Finding.
 
     Args:
-        enriched:  Best ``EnrichedVmMetrics`` for the VM / workload group, or
-                   ``None`` when no monitoring export matched this VM.
-        category:  Finding category used to determine whether the signal is
-                   authoritative (CLEANUP / QUOTA / RSVP / CRR / DECOM) or
-                   metric-dependent (RIGHTSIZE / SWAP).
+        enriched:               Best ``EnrichedVmMetrics`` for the VM / workload group, or
+                                ``None`` when no monitoring export matched this VM.
+        category:               Finding category used to determine whether the signal is
+                                authoritative (CLEANUP / QUOTA / RSVP / CRR / DECOM) or
+                                metric-dependent (RIGHTSIZE / SWAP).
+        code:                   Finding code (e.g. "DCM-IDL-001") for code-level base
+                                score overrides.
+        coverage_pct:           Fraction of the lookback window with data (0–100).
+        stability_cv:           Coefficient of variation of the primary metric series.
+        corroboration_sources:  Number of independent sources agreeing with the finding.
+        high_change_impact:     True when the VM has high change-impact risk (−10 penalty).
     """
-    scored = _confidence_score(enriched, category or Category.RIGHTSIZE)
+    scored = _confidence_score(
+        enriched,
+        category or Category.RIGHTSIZE,
+        code=code,
+        coverage_pct=coverage_pct,
+        stability_cv=stability_cv,
+        corroboration_sources=corroboration_sources,
+        high_change_impact=high_change_impact,
+    )
     return {
         "finding_type": FindingType.RECOMMENDATION,
         "confidence": scored.confidence,
+        "confidence_score": scored.confidence_score,
         "readiness": Readiness.LIKELY,
         "evidence_sources": scored.evidence_sources,
         "blockers_to_high": scored.blockers_to_high,
@@ -52,12 +73,18 @@ def _rec_kwargs(
 def _candidate_kwargs(
     enriched: Optional[EnrichedVmMetrics] = None,
     category: Optional[Category] = None,
+    code: Optional[str] = None,
 ) -> dict:
     """Return confidence-scored keyword defaults for a CANDIDATE Finding."""
-    scored = _confidence_score(enriched, category or Category.RIGHTSIZE)
+    scored = _confidence_score(
+        enriched,
+        category or Category.RIGHTSIZE,
+        code=code,
+    )
     return {
         "finding_type": FindingType.CANDIDATE,
         "confidence": None,
+        "confidence_score": scored.confidence_score,
         "readiness": Readiness.DISCOVERY,
         "evidence_sources": scored.evidence_sources,
         "blockers_to_high": [],

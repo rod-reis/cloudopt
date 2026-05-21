@@ -32,6 +32,8 @@ def _met(vm: VmInventory, metric: str, avg: float | None = None, p95: float | No
 def _catalog() -> SkuCatalog:
     cat = MagicMock(spec=SkuCatalog)
     cat.find_smaller_sku.return_value = None
+    cat.find_newer_generation_sku.return_value = None
+    cat.find_arm64_equivalent_sku.return_value = None
     return cat
 
 
