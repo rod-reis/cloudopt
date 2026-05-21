@@ -22,7 +22,7 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from cloudopt.collector.auth import SubscriptionInfo
-from cloudopt.models import AzureResource
+from cloudopt.models import AzureResource, ResourceGroupInfo
 from cloudopt.scope import ScopeFilter, kql_location_clause, kql_resource_group_clause
 
 console = Console()
@@ -189,3 +189,102 @@ def _str_or_none(val: Any) -> str | None:
         return None
     s = str(val).strip()
     return s if s else None
+
+
+# ---------------------------------------------------------------------------
+# Empty resource group collection (CLN-RGP-001)
+# ---------------------------------------------------------------------------
+
+# KQL: ResourceContainers joined with Resources to find resource groups with
+# no child resources.  The join is left-outer; RGs with no match in Resources
+# have a null count_ and are returned as empty.
+_EMPTY_RG_QUERY = """
+ResourceContainers
+| where type == 'microsoft.resources/subscriptions/resourcegroups'
+| where isnull(managedBy) or managedBy == ''
+| extend rgKey = strcat(tolower(subscriptionId), '/', tolower(name))
+| join kind=leftouter (
+    Resources
+    | summarize resourceCount=count() by rgKey=strcat(tolower(subscriptionId), '/', tolower(resourceGroup))
+) on rgKey
+| where isnull(resourceCount) or resourceCount == 0
+| project
+    id,
+    name,
+    subscriptionId,
+    location
+| order by subscriptionId asc, name asc
+"""
+
+
+def collect_empty_resource_groups(
+    credential: DefaultAzureCredential,
+    subscriptions: list[SubscriptionInfo],
+    scope: ScopeFilter | None = None,
+) -> list[ResourceGroupInfo]:
+    """Return all resource groups that contain no resources (CLN-RGP-001 input).
+
+    Uses a single ARG query that joins ``ResourceContainers`` with
+    ``Resources`` and returns only the groups with zero child resources.
+    Scope region and resource-group filters are NOT applied here — all empty
+    RGs in the target subscriptions are returned.
+
+    Args:
+        credential:    Azure credential.
+        subscriptions: In-scope subscriptions.
+        scope:         Ignored (provided for call-site symmetry with
+                       :func:`collect_resources`).
+    """
+    if not subscriptions:
+        return []
+
+    sub_map: dict[str, str] = {s.subscription_id: s.subscription_name for s in subscriptions}
+    sub_ids = list(sub_map.keys())
+
+    client = ResourceGraphClient(credential)
+    results: list[ResourceGroupInfo] = []
+
+    batches = [sub_ids[i: i + _MAX_SUBS_PER_QUERY] for i in range(0, len(sub_ids), _MAX_SUBS_PER_QUERY)]
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+        transient=True,
+    ) as progress:
+        task = progress.add_task("Collecting empty resource groups…", total=len(batches))
+
+        for batch in batches:
+            skip_token: str | None = None
+            while True:
+                options = QueryRequestOptions(result_format="objectArray", skip_token=skip_token)
+                request = QueryRequest(subscriptions=batch, query=_EMPTY_RG_QUERY, options=options)
+                try:
+                    response = client.resources(request)
+                except Exception as exc:
+                    console.print(f"[yellow]Warning:[/yellow] ARG empty-RG query failed: {exc}")
+                    break
+
+                rows: list[dict[str, Any]] = response.data or []
+                for row in rows:
+                    sub_id = str(row.get("subscriptionId", ""))
+                    name = str(row.get("name", ""))
+                    rg_id = str(row.get("id", ""))
+                    results.append(
+                        ResourceGroupInfo(
+                            resource_id=rg_id,
+                            name=name,
+                            subscription_id=sub_id,
+                            subscription_name=sub_map.get(sub_id, sub_id),
+                            location=str(row.get("location", "")),
+                        )
+                    )
+
+                if hasattr(response, "skip_token") and response.skip_token:
+                    skip_token = response.skip_token
+                else:
+                    break
+
+            progress.advance(task)
+
+    return results

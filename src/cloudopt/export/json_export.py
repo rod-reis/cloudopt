@@ -15,6 +15,7 @@ from cloudopt.models import (
     CollectionMetadata,
     ManagedComputeGroupRow,
     QuotaItem,
+    ResourceGroupInfo,
     SubscriptionZoneMapping,
     VmInventory,
     VmMetrics,
@@ -43,6 +44,7 @@ def write_json(
     resources: list[AzureResource] | None = None,
     capacity_reservations: list[CapacityReservationGroup] | None = None,
     vmss_groups: list[ManagedComputeGroupRow] | None = None,
+    empty_resource_groups: list[ResourceGroupInfo] | None = None,
 ) -> None:
     """Write all collection data to a JSON file at *path*."""
     payload: dict = {
@@ -59,6 +61,7 @@ def write_json(
         "resources": [_resource_dict(r) for r in (resources or [])],
         "capacity_reservations": [_crg_dict(c) for c in (capacity_reservations or [])],
         "vmss_groups": [g.model_dump() for g in (vmss_groups or [])],
+        "empty_resource_groups": [rg.masked_dict() for rg in (empty_resource_groups or [])],
     }
     if enriched_metrics is not None:
         payload["enrichment"] = {

@@ -174,8 +174,13 @@ def _evaluate(
                 f"over {lookback} days{wf_note}.{net_note} "
                 "Consider a smaller SKU or decommissioning."
             )
-            out.append(_make_rsz_finding(group, sku, recommended, rationale, signal="underutilized", enriched=group_enriched))
-            size_rec_emitted = True
+            finding = _make_rsz_finding(
+                group, sku, recommended, rationale, signal="underutilized",
+                enriched=group_enriched, thresholds=thresholds, catalog=catalog,
+            )
+            if finding is not None:
+                out.append(finding)
+                size_rec_emitted = True
 
     # Rule B: oversized — P95 CPU below threshold (only if underutilized not emitted)
     if (
@@ -204,7 +209,12 @@ def _evaluate(
                 f"{max(0.5, memory_gb * ((mem_pct_avg or 50.0) / 100) * thresholds.headroom_multiplier):.1f}"
                 " GB memory."
             )
-            out.append(_make_rsz_finding(group, sku, recommended, rationale, signal="oversized", enriched=group_enriched))
+            finding = _make_rsz_finding(
+                group, sku, recommended, rationale, signal="oversized",
+                enriched=group_enriched, thresholds=thresholds, catalog=catalog,
+            )
+            if finding is not None:
+                out.append(finding)
 
     return out
 
@@ -299,12 +309,36 @@ def _make_rsz_finding(
     rationale: str,
     signal: str = "",
     enriched: Optional[EnrichedVmMetrics] = None,
-) -> Finding:
+    thresholds: Optional[CollectionThresholds] = None,
+    catalog: Optional[SkuCatalog] = None,
+) -> Optional[Finding]:
+    """Build and return an RSZ-DWN-001 Finding, or None when the proposed change
+    is immaterial (below the material-change threshold in CollectionThresholds).
+
+    Immaterial changes (tiny vCPU/memory deltas) are suppressed to avoid
+    generating noise for single-step adjustments that deliver no meaningful
+    capacity benefit.
+    """
     vm_id = (
         group.parent_id
         if group.is_aggregated
         else group.members[0].resource_id
     )
+
+    # Material-change filter: suppress trivially small downsizes
+    if proposed_sku and thresholds and catalog:
+        representative_vm = group.members[0]
+        current_spec = catalog.get(representative_vm.subscription_id, representative_vm.region, current_sku)
+        proposed_spec = catalog.get(representative_vm.subscription_id, representative_vm.region, proposed_sku)
+        if current_spec and proposed_spec:
+            vcpu_delta = current_spec.vcpus - proposed_spec.vcpus
+            mem_delta_gb = current_spec.memory_gb - proposed_spec.memory_gb
+            if (
+                vcpu_delta < thresholds.material_change_min_vcpu_delta
+                and mem_delta_gb < thresholds.material_change_min_mem_delta_gb
+            ):
+                return None
+
     kwargs = _rec_kwargs(enriched=enriched, category=Category.RIGHTSIZE)
     if signal:
         kwargs["deltas"] = {"signal": signal}

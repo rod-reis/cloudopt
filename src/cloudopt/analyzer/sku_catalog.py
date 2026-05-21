@@ -6,6 +6,7 @@ to avoid repeated calls when enriching large inventories.
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 
@@ -130,6 +131,137 @@ class SkuCatalog:
         candidates.sort()
         return candidates[0][2]
 
+    def find_larger_sku(
+        self,
+        subscription_id: str,
+        region: str,
+        current_sku: str,
+        max_scale_factor: float = 2.0,
+    ) -> str | None:
+        """Return the smallest SKU in the same family that is strictly larger.
+
+        Only considers SKUs with more vCPUs than the current one and up to
+        ``max_scale_factor`` × the current vCPU count.  Returns None when the
+        VM is already at the top of its family or no option is within the scale
+        limit.
+        """
+        self._load(subscription_id, region)
+        cache_key = (subscription_id, region.lower())
+        catalog = self._cache.get(cache_key, {})
+
+        current_spec = catalog.get(current_sku)
+        if not current_spec:
+            return None
+
+        family_prefix = _sku_family_prefix(current_sku)
+
+        candidates: list[tuple[int, float, str]] = []
+        for name, spec in catalog.items():
+            if name == current_sku:
+                continue
+            if not name.lower().startswith(family_prefix.lower()):
+                continue
+            if spec.vcpus <= current_spec.vcpus:
+                continue
+            if spec.vcpus > current_spec.vcpus * max_scale_factor:
+                continue
+            # Require at least as much memory (don't trade memory for vCPUs)
+            if spec.memory_gb < current_spec.memory_gb:
+                continue
+            candidates.append((spec.vcpus, spec.memory_gb, name))
+
+        if not candidates:
+            return None
+
+        # Pick the smallest step up
+        candidates.sort()
+        return candidates[0][2]
+
+    def find_newer_generation_sku(
+        self,
+        subscription_id: str,
+        region: str,
+        current_sku: str,
+    ) -> tuple[str, int] | None:
+        """Return ``(newer_sku_name, new_generation)`` or None if already latest.
+
+        Matches on the SKU base name (everything except the _vN suffix) and
+        requires identical vCPU count with memory within 5% tolerance.  Returns
+        the highest available generation.
+        """
+        self._load(subscription_id, region)
+        cache_key = (subscription_id, region.lower())
+        catalog = self._cache.get(cache_key, {})
+
+        current_spec = catalog.get(current_sku)
+        if not current_spec:
+            return None
+
+        current_gen = _sku_generation_version(current_sku)
+        if current_gen == 0:
+            return None  # no _vN suffix — generation comparison not applicable
+
+        base = _sku_base_name(current_sku).lower()
+        mem_tol = max(current_spec.memory_gb * 0.05, 0.5)
+
+        candidates: list[tuple[int, str]] = []  # (generation, sku_name)
+        for name, spec in catalog.items():
+            if _sku_base_name(name).lower() != base:
+                continue
+            gen = _sku_generation_version(name)
+            if gen <= current_gen:
+                continue
+            if spec.vcpus != current_spec.vcpus:
+                continue
+            if abs(spec.memory_gb - current_spec.memory_gb) > mem_tol:
+                continue
+            candidates.append((gen, name))
+
+        if not candidates:
+            return None
+
+        candidates.sort(reverse=True)
+        best_gen, best_name = candidates[0]
+        return best_name, best_gen
+
+    def find_arm64_equivalent_sku(
+        self,
+        subscription_id: str,
+        region: str,
+        current_sku: str,
+    ) -> str | None:
+        """Return an ARM64 (Ampere Altra) SKU with the same shape, or None.
+
+        ARM64 SKUs carry 'p' immediately after the family letter
+        (e.g. Standard_Dps_v5, Standard_Eps_v5).  A match requires identical
+        vCPUs and memory within 5% tolerance.  The highest available generation
+        is returned when multiple matches exist.
+        """
+        self._load(subscription_id, region)
+        cache_key = (subscription_id, region.lower())
+        catalog = self._cache.get(cache_key, {})
+
+        current_spec = catalog.get(current_sku)
+        if not current_spec:
+            return None
+
+        mem_tol = max(current_spec.memory_gb * 0.05, 0.5)
+        candidates: list[tuple[int, str]] = []
+        for name, spec in catalog.items():
+            if not _is_arm64_sku(name):
+                continue
+            if spec.vcpus != current_spec.vcpus:
+                continue
+            if abs(spec.memory_gb - current_spec.memory_gb) > mem_tol:
+                continue
+            candidates.append((_sku_generation_version(name), name))
+
+        if not candidates:
+            return None
+
+        candidates.sort(reverse=True)
+        return candidates[0][1]
+
 
 def _sku_family_prefix(sku_name: str) -> str:
     """Extract the family prefix from a SKU name.
@@ -149,13 +281,55 @@ def _sku_family_prefix(sku_name: str) -> str:
     return f"Standard_{prefix}" if prefix else sku_name
 
 
+_SKU_GEN_RE = re.compile(r"_v(\d+)$", re.IGNORECASE)
+_ARM64_RE = re.compile(r"^Standard_[A-Z]p", re.IGNORECASE)
+
+
+def _sku_generation_version(sku_name: str) -> int:
+    """Extract the generation version number from a SKU name.
+
+    Returns 0 for SKUs without a _vN suffix (e.g. Standard_B2ms).
+
+    Examples:
+      "Standard_D4s_v3"  → 3
+      "Standard_E8as_v5" → 5
+      "Standard_B2ms"    → 0
+    """
+    m = _SKU_GEN_RE.search(sku_name)
+    return int(m.group(1)) if m else 0
+
+
+def _sku_base_name(sku_name: str) -> str:
+    """Strip the _vN generation suffix to produce the base name.
+
+    Used for generation-swap matching: two SKUs that share the same base
+    name but differ only in their _vN suffix are the same 'shape' in
+    different generations.
+
+    Examples:
+      "Standard_D4s_v3"  → "Standard_D4s"
+      "Standard_E8as_v5" → "Standard_E8as"
+      "Standard_B2ms"    → "Standard_B2ms"
+    """
+    return _SKU_GEN_RE.sub("", sku_name)
+
+
+def _is_arm64_sku(sku: str) -> bool:
+    """Return True when *sku* is an ARM64 (Ampere Altra) SKU.
+
+    ARM64 SKUs are identified by 'p' immediately after the family letter:
+    Standard_Dps_v5, Standard_Dpds_v5, Standard_Eps_v5, etc.
+    """
+    return bool(_ARM64_RE.match(sku))
+
+
 class OfflineSkuCatalog:
     """No-network SKU catalog for offline analysis (e.g., ``analyze`` command).
 
-    ``find_smaller_sku`` always returns ``None``; the recommendation engine
-    still emits recommendations — it just cannot name a specific target SKU.
-    Use this class when Azure credentials are unavailable (e.g., when running
-    analysis on an already-exported JSON file).
+    All lookup methods return ``None``; the recommendation engine still emits
+    findings — it just cannot name a specific target SKU.  Use this class when
+    Azure credentials are unavailable (e.g., when running analysis on an
+    already-exported JSON file).
     """
 
     def get(
@@ -173,5 +347,30 @@ class OfflineSkuCatalog:
         current_sku: str,
         required_vcpus: int,
         required_memory_gb: float,
+    ) -> None:
+        return None
+
+    def find_larger_sku(
+        self,
+        subscription_id: str,
+        region: str,
+        current_sku: str,
+        max_scale_factor: float = 2.0,
+    ) -> None:
+        return None
+
+    def find_newer_generation_sku(
+        self,
+        subscription_id: str,
+        region: str,
+        current_sku: str,
+    ) -> None:
+        return None
+
+    def find_arm64_equivalent_sku(
+        self,
+        subscription_id: str,
+        region: str,
+        current_sku: str,
     ) -> None:
         return None

@@ -1,19 +1,16 @@
-"""CLN-DSK-001, CLN-NIC-001, CLN-PIP-001, CLN-SNP-001 detectors — orphaned resources.
+"""CLN-DSK-001, CLN-NIC-001, CLN-PIP-001, CLN-SNP-001, CLN-RGP-001 detectors — orphaned resources.
 
 This detector operates on ``AzureResource`` objects collected by the
 ``resources`` collector rather than on ``VmInventory``.  The standard
-``detect()`` signature is extended with an optional ``resources`` keyword
-argument (SPEC §11.2.1 permits additional kwargs for detectors that need
-extra inputs).
+``detect()`` signature is extended with optional ``resources`` and
+``empty_resource_groups`` keyword arguments.
 
-Implemented in Step 2:
+Implemented:
   CLN-DSK-001 — unattached managed disk (managed_by empty) for ≥ 30 days
   CLN-NIC-001 — NIC with no managed_by reference (best-effort proxy)
   CLN-PIP-001 — public IP with no managed_by reference (best-effort proxy)
   CLN-SNP-001 — all snapshots flagged for review (no age data in model)
-
-Deferred (data not available in current AzureResource model):
-  CLN-RGP-001 — empty resource groups (requires the full RG list)
+  CLN-RGP-001 — empty resource groups (no resources in ARG scan)
 
 NOTE: Finding.vm_id is used as a generic resource identifier for non-VM
 findings; for cleanup findings it holds the orphaned resource's resource_id.
@@ -22,6 +19,7 @@ findings; for cleanup findings it holds the orphaned resource's resource_id.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Optional
 
 from cloudopt.analyzer.detectors._shared import _rec_kwargs
 from cloudopt.analyzer.sku_catalog import SkuCatalog
@@ -31,6 +29,7 @@ from cloudopt.models import (
     CollectionThresholds,
     Finding,
     QuotaItem,
+    ResourceGroupInfo,
     VmInventory,
     VmMetrics,
 )
@@ -51,30 +50,38 @@ def detect(
     catalog: SkuCatalog,
     *,
     resources: list[AzureResource] | None = None,
+    empty_resource_groups: list[ResourceGroupInfo] | None = None,
 ) -> list[Finding]:
-    """Emit CLN-* Findings for orphaned Azure resources.
+    """Emit CLN-* Findings for orphaned Azure resources and empty resource groups.
 
     ``vms``, ``metrics``, and ``quota`` are accepted for interface uniformity
     but not used.  The caller must supply ``resources`` (the output of
-    ``collect_resources()``) for any Findings to be emitted.
+    ``collect_resources()``) for disk/NIC/PIP/snapshot findings, and
+    ``empty_resource_groups`` (output of ``collect_empty_resource_groups()``)
+    for CLN-RGP-001 findings.
     """
-    if not resources:
-        return []
     out: list[Finding] = []
-    for r in resources:
-        rt = r.resource_type.lower()
-        if rt == _DISK_TYPE:
-            f = _check_disk(r)
-        elif rt == _NIC_TYPE:
-            f = _check_nic(r)
-        elif rt == _PIP_TYPE:
-            f = _check_pip(r)
-        elif rt == _SNAP_TYPE:
-            f = _check_snapshot(r)
-        else:
-            continue
-        if f is not None:
-            out.append(f)
+
+    if resources:
+        for r in resources:
+            rt = r.resource_type.lower()
+            if rt == _DISK_TYPE:
+                f = _check_disk(r)
+            elif rt == _NIC_TYPE:
+                f = _check_nic(r)
+            elif rt == _PIP_TYPE:
+                f = _check_pip(r)
+            elif rt == _SNAP_TYPE:
+                f = _check_snapshot(r)
+            else:
+                continue
+            if f is not None:
+                out.append(f)
+
+    if empty_resource_groups:
+        for rg in empty_resource_groups:
+            out.append(_check_empty_rg(rg))
+
     return out
 
 
@@ -166,4 +173,23 @@ def _check_snapshot(r: AzureResource) -> Finding | None:
             "to reduce storage costs. (Age data not available in current collection.)"
         ),
         **_rec_kwargs(),
+    )
+
+
+def _check_empty_rg(rg: ResourceGroupInfo) -> Finding:
+    return Finding(
+        vm_id=rg.resource_id,
+        category=Category.CLEANUP,
+        subcategory=SubCategory.EMPTY_RESOURCE_GROUP,
+        code="CLN-RGP-001",
+        current="microsoft.resources/resourcegroups",
+        proposed=None,
+        rationale=(
+            f"Resource group '{rg.name}' in subscription '{rg.subscription_name}' "
+            f"(region: {rg.location}) contains no resources. "
+            "Empty resource groups incur no direct cost but create noise in inventory "
+            "and may indicate stale or abandoned deployments. Review and delete if "
+            "the group is no longer needed."
+        ),
+        **_rec_kwargs(category=Category.CLEANUP),
     )

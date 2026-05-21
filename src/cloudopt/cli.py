@@ -350,7 +350,7 @@ def collect(
     from cloudopt.collector.inventory import collect_inventory, count_resources_by_type
     from cloudopt.collector.metrics import collect_metrics
     from cloudopt.collector.quota import collect_quota, sub_regions_from_vms
-    from cloudopt.collector.resources import collect_resources
+    from cloudopt.collector.resources import collect_resources, collect_empty_resource_groups
     from cloudopt.collector.zones import collect_zone_mappings
     from cloudopt.collector.appinsights import (
         collect_appinsights_inventory,
@@ -640,6 +640,15 @@ def collect(
     )
     _debug_time(debug, "Step 7d: Resource inventory", _t)
 
+    # ── 7d-ii. Empty resource groups (CLN-RGP-001) ───────────────────────
+    console.print("[bold]Step 7d-ii:[/bold] Collecting empty resource groups…")
+    _t = time.perf_counter()
+    empty_rgs = collect_empty_resource_groups(credential=credential, subscriptions=target_subs, scope=scope)
+    console.print(
+        f"[green]✓[/green] {len(empty_rgs)} empty resource group(s) found.\n"
+    )
+    _debug_time(debug, "Step 7d-ii: Empty resource groups", _t)
+
     # ── 7e. Stop history for deallocated / stopped VMs ───────────────────
     from cloudopt.collector.stop_history import collect_stop_history
 
@@ -775,6 +784,7 @@ def collect(
         zone_mappings=zone_maps,
         resources=all_resources,
         vmss_groups=vmss_uniform_groups,
+        empty_resource_groups=empty_rgs,
     )
     _debug_time(debug, "Step 8: JSON export", _t)
 
@@ -993,6 +1003,15 @@ def analyze(
         except Exception:
             pass
 
+    # --- Empty resource groups (CLN-RGP-001) ------------------------------
+    from cloudopt.models import ResourceGroupInfo as _ResourceGroupInfo
+    empty_rgs_from_json: list[_ResourceGroupInfo] = []
+    for d in raw.get("empty_resource_groups", []):
+        try:
+            empty_rgs_from_json.append(_ResourceGroupInfo(**d))
+        except Exception:
+            pass
+
     # --- Deployment Failures ----------------------------------------------
     dep_failures_from_json: list[DeploymentFailureEntry] = []
     for d in raw.get("deployment_failures", []):
@@ -1070,6 +1089,7 @@ def analyze(
             thresholds=thresholds,
             catalog=catalog,
             resources=resources_from_json,
+            empty_resource_groups=empty_rgs_from_json,
             crg_items=crg_from_json,
             enriched_map=enriched_map or None,
         )

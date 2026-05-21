@@ -98,6 +98,21 @@ class CollectionThresholds(BaseModel):
         default=30,
         description="Measurement window in days for quota utilization.",
     )
+    # --- material-change filter (Phase 1.7) ---
+    material_change_min_vcpu_delta: int = Field(
+        default=1,
+        description=(
+            "Minimum vCPU difference required for a downsize finding to be emitted. "
+            "Findings where vcpu_delta < this value are suppressed as immaterial."
+        ),
+    )
+    material_change_min_mem_delta_gb: float = Field(
+        default=4.0,
+        description=(
+            "Minimum memory difference (GB) required for a downsize finding to be "
+            "emitted.  Findings where mem_delta_gb < this value are suppressed."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -551,6 +566,36 @@ class AzureResource(BaseModel):
 
     def masked_subscription_id(self) -> str:
         return mask_subscription_id(self.subscription_id)
+
+
+class ResourceGroupInfo(BaseModel):
+    """Lightweight descriptor for an Azure Resource Group.
+
+    Used by CLN-RGP-001 to identify resource groups with no resources.
+    The ``resource_id`` field is the full ARM resource ID:
+    ``/subscriptions/{sub_id}/resourceGroups/{name}``.
+    """
+
+    resource_id: str
+    name: str
+    subscription_id: str
+    subscription_name: str
+    location: str
+
+    def masked_resource_id(self) -> str:
+        return mask_subscription_ids_in_string(self.resource_id)
+
+    def masked_subscription_id(self) -> str:
+        return mask_subscription_id(self.subscription_id)
+
+    def masked_dict(self) -> dict:
+        return {
+            "resource_id": self.masked_resource_id(),
+            "name": self.name,
+            "subscription_id": self.masked_subscription_id(),
+            "subscription_name": self.subscription_name,
+            "location": self.location,
+        }
 
 
 class WorkloadInfo(BaseModel):
