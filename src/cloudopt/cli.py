@@ -437,6 +437,15 @@ def collect(
     if output_dir == Path("output") and file_scope and file_scope.output_dir:
         eff_output_dir = file_scope.output_dir
 
+    # Boolean flags: CLI flag wins; config file is the fallback; built-in default last
+    if not debug and file_scope and file_scope.debug:
+        debug = file_scope.debug
+    if not dry_run and file_scope and file_scope.dry_run:
+        dry_run = file_scope.dry_run
+    eff_collect_alerts = True  # default on
+    if file_scope and file_scope.collect_alerts is not None:
+        eff_collect_alerts = file_scope.collect_alerts
+
     try:
         scope = build_scope(
             tenant_id=eff_tenant,
@@ -749,6 +758,40 @@ def collect(
         console.print("[dim]No VMSS groups to classify.[/dim]\n")
     _debug_time(debug, "Step 7g: Parentage resolution", _t)
 
+    # ── 7h. Capacity alert rules (for QTA-OPS-001) ───────────────────────
+    capacity_alerts = []
+    if eff_collect_alerts:
+        from cloudopt.collector.alerts import collect_capacity_alerts
+        console.print("[bold]Step 7h:[/bold] Collecting Azure Monitor capacity alert rules…")
+        _t = time.perf_counter()
+        try:
+            capacity_alerts = collect_capacity_alerts(credential, target_subs)
+            enabled = sum(1 for a in capacity_alerts if a.enabled)
+            console.print(
+                f"[green]✓[/green] {len(capacity_alerts)} alert rule(s) discovered "
+                f"({enabled} enabled).\n"
+            )
+        except Exception as exc:
+            console.print(f"[yellow]Warning:[/yellow] Alert collection failed (skipped): {exc}\n")
+            capacity_alerts = []
+        _debug_time(debug, "Step 7h: Capacity alerts", _t)
+    else:
+        console.print("[dim]Step 7h: Alert collection disabled via config.[/dim]\n")
+
+    # ── 7i. Workload archetype enrichment ────────────────────────────────
+    from cloudopt.analyzer.archetype import enrich_vm_archetype
+    console.print("[bold]Step 7i:[/bold] Classifying workload archetypes…")
+    _t = time.perf_counter()
+    _ai_metrics_by_resource: dict = {}
+    for _m in ai_metrics:
+        _ai_metrics_by_resource.setdefault(_m.resource_id, []).append(_m)
+    enrich_vm_archetype(vms, all_metrics, ai_metrics_by_resource=_ai_metrics_by_resource)
+    classified = sum(1 for v in vms if v.workload_archetype.value != "unknown")
+    console.print(
+        f"[green]✓[/green] {classified}/{len(vms)} VM(s) classified with a workload archetype.\n"
+    )
+    _debug_time(debug, "Step 7i: Archetype classification", _t)
+
     # ── 8. Export ────────────────────────────────────────────────────────
     from cloudopt.models import (
         CollectionMetadata,
@@ -783,6 +826,7 @@ def collect(
         workload_info=workload_info,
         zone_mappings=zone_maps,
         resources=all_resources,
+        capacity_alerts=capacity_alerts,
         vmss_groups=vmss_uniform_groups,
         empty_resource_groups=empty_rgs,
     )
@@ -876,6 +920,8 @@ def analyze(
         AdvisorRecommendation,
         AppInsightsInventory,
         AppInsightsMetrics,
+        CapacityAlert,
+        CapacityAlertType,
         CapacityReservationGroup,
         CollectionMetadata,
         CollectionThresholds,
@@ -1020,6 +1066,27 @@ def analyze(
         except Exception:
             pass
 
+    # --- Capacity Alerts (QTA-OPS-001) ------------------------------------
+    capacity_alerts_from_json: list[CapacityAlert] = []
+    for d in raw.get("capacity_alerts", []):
+        try:
+            atype = d.get("alert_type", "metric_alert")
+            try:
+                atype_enum = CapacityAlertType(atype)
+            except ValueError:
+                atype_enum = CapacityAlertType.METRIC_ALERT
+            capacity_alerts_from_json.append(CapacityAlert(
+                resource_id=d.get("resource_id", ""),
+                subscription_id=d.get("subscription_id", ""),
+                alert_type=atype_enum,
+                name=d.get("name", ""),
+                enabled=d.get("enabled", False),
+                signals=d.get("signals", []),
+                scopes=d.get("scopes", []),
+            ))
+        except Exception:
+            pass
+
     # --- Metadata ----------------------------------------------------------
     meta_raw = raw.get("metadata", {})
     try:
@@ -1068,6 +1135,15 @@ def analyze(
         except Exception as exc:
             console.print(f"[yellow]Warning:[/yellow] Could not load monitoring CSV: {exc}")
 
+    # --- Workload archetype enrichment ------------------------------------
+    from cloudopt.analyzer.archetype import enrich_vm_archetype as _enrich_arch
+    _ai_metrics_by_resource: dict = {}
+    for _m in appinsights_metrics:
+        _ai_metrics_by_resource.setdefault(_m.resource_id, []).append(_m)
+    _enrich_arch(vms, metrics, ai_metrics_by_resource=_ai_metrics_by_resource or None)
+    _classified = sum(1 for v in vms if v.workload_archetype.value != "unknown")
+    console.print(f"  [green]✓[/green] {_classified}/{len(vms)} VM(s) classified with a workload archetype.")
+
     # --- Generate legacy recommendations (backward compat) ---------------
     thresholds = metadata.thresholds
     recommendations = generate_recommendations(
@@ -1092,6 +1168,7 @@ def analyze(
             empty_resource_groups=empty_rgs_from_json,
             crg_items=crg_from_json,
             enriched_map=enriched_map or None,
+            capacity_alerts=capacity_alerts_from_json or None,
         )
         console.print(f"  [green]✓[/green] {len(findings)} finding(s) generated by detector pipeline.")
     except Exception as exc:

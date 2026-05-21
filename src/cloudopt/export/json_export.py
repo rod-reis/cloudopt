@@ -11,6 +11,7 @@ from cloudopt.models import (
     AppInsightsInventory,
     AppInsightsMetrics,
     AzureResource,
+    CapacityAlert,
     CapacityReservationGroup,
     CollectionMetadata,
     ManagedComputeGroupRow,
@@ -43,6 +44,7 @@ def write_json(
     enrichment_summary: EnrichmentSummary | None = None,
     resources: list[AzureResource] | None = None,
     capacity_reservations: list[CapacityReservationGroup] | None = None,
+    capacity_alerts: list[CapacityAlert] | None = None,
     vmss_groups: list[ManagedComputeGroupRow] | None = None,
     empty_resource_groups: list[ResourceGroupInfo] | None = None,
 ) -> None:
@@ -60,6 +62,7 @@ def write_json(
         "zone_mappings": [_zone_mapping_dict(z) for z in (zone_mappings or [])],
         "resources": [_resource_dict(r) for r in (resources or [])],
         "capacity_reservations": [_crg_dict(c) for c in (capacity_reservations or [])],
+        "capacity_alerts": [_alert_dict(a) for a in (capacity_alerts or [])],
         "vmss_groups": [g.model_dump() for g in (vmss_groups or [])],
         "empty_resource_groups": [rg.masked_dict() for rg in (empty_resource_groups or [])],
     }
@@ -301,4 +304,16 @@ def _crg_dict(c: CapacityReservationGroup) -> dict:
             }
             for item in c.reservations
         ],
+    }
+
+
+def _alert_dict(a: CapacityAlert) -> dict:
+    return {
+        "resource_id": mask_subscription_ids_in_string(a.resource_id or ""),
+        "subscription_id": mask_subscription_id(a.subscription_id or ""),
+        "alert_type": a.alert_type.value if hasattr(a.alert_type, "value") else str(a.alert_type),
+        "name": a.name,
+        "enabled": a.enabled,
+        "signals": a.signals,
+        "scopes": a.scopes,
     }

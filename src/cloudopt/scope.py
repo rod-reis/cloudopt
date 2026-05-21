@@ -200,6 +200,9 @@ class ScopeFilter:
     concurrency: int | None = None
     arm_rate: float | None = None
     output_dir: Path | None = None
+    debug: bool | None = None
+    dry_run: bool | None = None
+    collect_alerts: bool | None = None  # None means "use default (True)"
 
     @property
     def quota_subscription_ids(self) -> tuple[str, ...]:
@@ -278,6 +281,9 @@ def build_scope(
     concurrency: int | None = None,
     arm_rate: float | None = None,
     output_dir: Path | str | None = None,
+    debug: bool | None = None,
+    dry_run: bool | None = None,
+    collect_alerts: bool | None = None,
 ) -> ScopeFilter:
     """Validate and build a :class:`ScopeFilter` from raw user inputs."""
     sub_ids = tuple(parse_subscription_id(s) for s in (subscriptions or []) if s)
@@ -315,6 +321,9 @@ def build_scope(
         concurrency=concurrency,
         arm_rate=arm_rate,
         output_dir=out,
+        debug=debug,
+        dry_run=dry_run,
+        collect_alerts=collect_alerts,
     )
 
 
@@ -341,6 +350,11 @@ _SECTION_ALIASES: dict[str, str] = {
     "armratepersecond": "armrate",
     "output":           "output",
     "outputdir":        "output",
+    "debug":            "debug",
+    "dryrun":           "dryrun",
+    "dry_run":          "dryrun",
+    "collectalerts":    "collectalerts",
+    "collect_alerts":   "collectalerts",
 }
 
 
@@ -398,6 +412,17 @@ def scope_from_config_file(path: Path) -> ScopeFilter:
 
     output = _first("output")
 
+    def _parse_bool(section: str) -> bool | None:
+        """Return True/False for yes/no/true/false/1/0, else None (not specified)."""
+        v = _first(section)
+        if v is None:
+            return None
+        return v.strip().lower() in ("yes", "true", "1", "on")
+
+    debug = _parse_bool("debug")
+    dry_run = _parse_bool("dryrun")
+    collect_alerts = _parse_bool("collectalerts")
+
     return build_scope(
         tenant_id=tenant,
         subscriptions=subs,
@@ -408,6 +433,9 @@ def scope_from_config_file(path: Path) -> ScopeFilter:
         concurrency=concurrency,
         arm_rate=arm_rate,
         output_dir=output,
+        debug=debug,
+        dry_run=dry_run,
+        collect_alerts=collect_alerts,
     )
 
 

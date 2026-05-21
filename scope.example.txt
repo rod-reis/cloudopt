@@ -44,3 +44,22 @@ Owner!~Bill
 
 [output]
 ./output
+
+[armrate]
+20
+
+# Collect Azure Monitor alert rules for capacity operations hygiene (QTA-OPS-001).
+# Default is true. Set to false to skip alert rule collection (faster, but hygiene
+# section in the dashboard will show no data).
+[collect_alerts]
+true
+
+# Print per-step timing and verbose logging (equivalent to --debug flag).
+# Default is false.
+[debug]
+false
+
+# List discovered VMs without collecting metrics or generating findings
+# (equivalent to --dry-run flag). Default is false.
+[dryrun]
+false

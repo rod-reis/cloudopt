@@ -447,6 +447,9 @@ def _load_excel(path: Path) -> None:
     # Excel path: no capacity reservations or deployment failures stored in workbook
     _DATA["capacity_reservations"] = []
     _DATA["deployment_failures"] = []
+    # Workload archetype enrichment (no AI metrics available from Excel)
+    from cloudopt.analyzer.archetype import enrich_vm_archetype
+    enrich_vm_archetype(vms, metrics)
     # Run detector pipeline so findings are available
     from cloudopt.analyzer.detectors import run_all
     from cloudopt.analyzer.sku_catalog import OfflineSkuCatalog
@@ -537,6 +540,28 @@ def _load_json(path: Path) -> None:
             pass
     _DATA["deployment_failures"] = depfail
 
+    # --- Capacity Alerts (QTA-OPS-001) ---
+    from cloudopt.models import CapacityAlert, CapacityAlertType
+    capacity_alerts: list[CapacityAlert] = []
+    for d in raw.get("capacity_alerts", []):
+        try:
+            atype = d.get("alert_type", "metric_alert")
+            try:
+                atype_enum = CapacityAlertType(atype)
+            except ValueError:
+                atype_enum = CapacityAlertType.METRIC_ALERT
+            capacity_alerts.append(CapacityAlert(
+                resource_id=d.get("resource_id", ""),
+                subscription_id=d.get("subscription_id", ""),
+                alert_type=atype_enum,
+                name=d.get("name", ""),
+                enabled=d.get("enabled", False),
+                signals=d.get("signals", []),
+                scopes=d.get("scopes", []),
+            ))
+        except Exception:
+            pass
+
     # --- VMSS Uniform groups ---
     from cloudopt.models import ManagedComputeGroupRow
     vmss_groups: list[ManagedComputeGroupRow] = []
@@ -546,6 +571,21 @@ def _load_json(path: Path) -> None:
         except Exception:
             pass
     _DATA["vmss_groups"] = vmss_groups
+
+    # --- Workload archetype enrichment ---
+    from cloudopt.analyzer.archetype import enrich_vm_archetype
+    from cloudopt.models import AppInsightsMetrics as _AIM, DailyDataPoint as _DDP
+    ai_metrics_list: list = []
+    for d in raw.get("appinsights_metrics", []):
+        try:
+            ts2 = [_DDP(**p) for p in d.get("time_series", [])]
+            ai_metrics_list.append(_AIM(**{k: v for k, v in d.items() if k != "time_series"}, time_series=ts2))
+        except Exception:
+            pass
+    _ai_by_resource: dict = {}
+    for _m in ai_metrics_list:
+        _ai_by_resource.setdefault(_m.resource_id, []).append(_m)
+    enrich_vm_archetype(vms, metrics, ai_metrics_by_resource=_ai_by_resource or None)
 
     # --- Detector pipeline → Finding list --------------------------------
     from cloudopt.analyzer.detectors import run_all
@@ -568,6 +608,7 @@ def _load_json(path: Path) -> None:
             rsvp_orders=_DATA.get("reservations", []),
             crg_items=_DATA.get("capacity_reservations", []),
             enriched_map=None,
+            capacity_alerts=capacity_alerts or None,
         )
     except Exception:
         findings = []
