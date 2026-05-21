@@ -123,18 +123,45 @@ Tenant → Subscriptions → Locations (Regions) → ResourceGroups → Tags
 
 Tag values are **kept in memory only** and are never written to any output file.
 
-### Recommendation Engine (`analyzer/recommendations.py`)
+### Recommendation Engine
 
-The engine produces one or more `VmRecommendation` records per VM, grouped into
-five umbrella categories:
+The engine produces `Finding` records grouped into **6 categories** and **26 detection codes** (25 recommendations + 1 candidate flag):
 
-| Category             | Signal                                           |
-| -------------------- | ------------------------------------------------ |
-| `QUOTA_OPTIMIZATION` | Quota tiers approaching or exceeding thresholds  |
-| `SKU_SWAP`           | Same size class, different SKU family            |
-| `RESIZING`           | Underutilized / memory-bound → right-sized SKU   |
-| `MODERNIZATION`      | Legacy SKU or IaaS → PaaS migration candidate    |
-| `REGION_EXPANSION`   | Cross-subscription / cross-region redistribution |
+| Category  | Sub-codes | Signal                                                              |
+| --------- | --------- | ------------------------------------------------------------------- |
+| `rightsize` | RSZ-DWN-001, RSZ-UPS-001, RSZ-BSF-001, RSZ-BSM-001, RSZ-DSK-001 | Size mismatch — VM over- or under-provisioned for its workload |
+| `swap`    | SWP-GEN-001, SWP-FAM-001, SWP-LFC-001, SWP-DST-001, SWP-DSK-001, SWP-ARC-001* | Wrong SKU family, generation, or architecture |
+| `decom`   | DCM-IDL-001, DCM-STP-001, DCM-DLC-001, DCM-ENV-001 | Unused or stale VMs consuming capacity |
+| `cleanup` | CLN-DSK-001, CLN-NIC-001, CLN-PIP-001, CLN-SNP-001, CLN-RGP-001 | Orphaned resources distorting capacity planning |
+| `quota`   | QTA-OVR-001, QTA-WRN-001, QTA-CRI-001, QTA-CRG-001, QTA-OPS-001 | Quota thresholds and missing operational monitoring |
+| `crr`     | CRR-UNU-001, CRR-UNF-001 | Capacity Reservation Group posture |
+
+*`SWP-ARC-001` is a candidate flag (discovery only) — never auto-prescribed.
+
+Every finding has a **numeric confidence score (0–100)**:
+- ≥ 80 → **HIGH / READY** — act with normal change control
+- 50–79 → **MEDIUM / LIKELY** — validate with workload owner first
+- < 50 → **LOW / INSUFFICIENT** — treat as starting point for investigation
+
+Score is boosted by: OS-agent or APM enrichment data, high metric coverage, App Insights SLO corroboration, workload archetype classification.
+
+See [docs/RECOMMENDATIONS_CATALOG.md](docs/RECOMMENDATIONS_CATALOG.md) and [REPORTER.md](REPORTER.md) for full reference.
+
+### Workload Archetype Classification
+
+cloudopt classifies every VM into one of 7 archetypes using 30-day hourly CPU patterns:
+
+| Archetype | Signal |
+| --- | --- |
+| `steady-24x7` | Consistent CPU load day and night, low variability |
+| `business-hours` | Active Mon–Fri daytime; low outside business hours |
+| `weekend-idle` | Low activity on weekends |
+| `bursty` | High P95/P50 ratio with high coefficient of variation |
+| `spiky` | Infrequent sharp spikes against a low baseline |
+| `dev-test-irregular` | dev/test/qa tagged VM with irregular patterns |
+| `unknown` | Insufficient data (< 48 hourly points) |
+
+Archetypes feed recommendation logic (e.g., `RSZ-BSF-001` burstable fit is corroborated by `bursty` archetype) and are visible in the **Workload Archetypes** dashboard section.
 
 ---
 
@@ -186,13 +213,14 @@ cloudopt dashboard --data output/cloudopt_report.xlsx
 
 ## Commands
 
-| Command              | Who runs it | Description                                            |
-| -------------------- | ----------- | ------------------------------------------------------ |
-| `cloudopt collect`   | Customer    | Full collection: inventory + metrics + quota + Advisor |
-| `cloudopt analyze`   | Engineer    | Generates Excel workbook from JSON                     |
-| `cloudopt dashboard` | Engineer    | Local FastAPI web dashboard                            |
-| `cloudopt export`    | Engineer    | Re-exports workbook to JSON / CSV                      |
-| `cloudopt version`   | Anyone      | Print version                                          |
+| Command                  | Who runs it | Description                                            |
+| ------------------------ | ----------- | ------------------------------------------------------ |
+| `cloudopt collect`       | Customer    | Full collection: inventory + metrics + quota + Advisor |
+| `cloudopt analyze`       | Engineer    | Generates Excel workbook from JSON                     |
+| `cloudopt dashboard`     | Engineer    | Local FastAPI web dashboard                            |
+| `cloudopt export`        | Engineer    | Re-exports workbook to JSON / CSV                      |
+| `cloudopt update-status` | Engineer    | Updates finding status in the side-car CSV             |
+| `cloudopt version`       | Anyone      | Print version                                          |
 
 See [HOW_TO.md](HOW_TO.md) for full option reference.
 

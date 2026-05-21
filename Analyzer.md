@@ -117,13 +117,14 @@ The generated workbook contains the following sheets:
 
 | Sheet                        | Contents                                                                                                                             |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| **Executive Summary**        | Auto-generated Sheet 0: top KPIs, top-10 quick wins by priority score, capacity ops hygiene scorecard per subscription              |
 | VM Inventory                 | One row per VM: SKU, vCPUs, memory, region, zones, OS image, power state, disk layout, NIC count, VMSS / availability-set membership |
 | Performance Summary          | Avg / P50 / P95 / P99 / Max CPU, Min CPU, memory, disk I/O, and network per VM                                                       |
 | SKU Perf by Subscription     | Metrics aggregated by subscription                                                                                                   |
 | SKU Perf by Resource Group   | Metrics aggregated by resource group                                                                                                 |
 | SKU Perf by VMSS             | Metrics for VMSS-grouped VMs                                                                                                         |
 | SKU Perf by Availability Set | Metrics for availability-set VMs                                                                                                     |
-| **Optimizations**            | Analyst-authored right-sizing and migration findings (pre-populated from Azure Advisor; empty rows for manual additions)             |
+| **Decisions**                | Auto-populated findings from the analyzer — code, current, proposed, confidence score, rationale. Pre-sorted by priority score.     |
 | Quota Utilization            | Core quota usage per subscription / region                                                                                           |
 | Raw Metrics                  | Full daily time-series for every collected metric                                                                                    |
 | App Insights                 | Inventory + summarised metrics for all App Insights components                                                                       |
@@ -134,43 +135,31 @@ The generated workbook contains the following sheets:
 
 ---
 
-## Analyst-Editable Fields
+## Finding Status Workflow
 
-The **VM Inventory** sheet contains six blank columns for the analyst to complete
-before presenting findings to the customer:
+Track the disposition of recommendations without touching the workbook using the `update-status` command:
 
-| Column      | Purpose                        |
-| ----------- | ------------------------------ |
-| Workload    | Application or service name    |
-| Application | Business application or system |
-| Environment | e.g. Production, Dev, Test     |
-| Criticality | e.g. High, Medium, Low         |
-| Owner       | Team or person responsible     |
-| Custom      | Free-text notes                |
+```bash
+cloudopt update-status <finding_id> <status> [OPTIONS]
+```
 
----
+| Option | Default | Description |
+|---|---|---|
+| `--owner TEXT` | (empty) | Name / alias of the person responsible |
+| `--due DATE` | (empty) | Target completion date (YYYY-MM-DD) |
+| `--notes TEXT` | (empty) | Free-text context or reason |
+| `--data PATH` | Auto-detected `*.xlsx` in cwd | Path to the Excel workbook |
 
-## Optimizations Sheet
+Status values: `open` (default) → `in_progress` → `done` or `dismissed`
 
-The **Optimizations** sheet is intentionally left blank during collection. It
-is the primary deliverable for an engagement — fill it in based on your
-analysis of the Performance Summary, Quota Utilization, and Azure Advisor
-findings already captured in the workbook.
+Finding IDs are shown in the **Action Plan** section of the dashboard and follow the format `<CODE>:<resource_id>`, for example:
+```
+RSZ-DWN-001:/subscriptions/abc12345.../resourceGroups/rg-prod/.../vm-web-01
+```
 
-Suggested columns to populate per finding:
+Status is stored in `<workbook_stem>_status.csv` alongside the workbook and is loaded automatically by `cloudopt dashboard`.
 
-| Column                   | Guidance                                           |
-| ------------------------ | -------------------------------------------------- |
-| Workload                 | Name from VM Inventory                             |
-| Category                 | e.g. Resizing, SKU Swap, Quota, Modernization      |
-| Resource ID              | VM, VMSS, or resource group the finding applies to |
-| Current SKU              | Observed SKU                                       |
-| Recommended SKU / Action | Proposed change                                    |
-| Justification            | Metric-backed rationale                            |
-| Priority                 | High / Medium / Low                                |
-| Notes                    | Observations or caveats                            |
-
-After populating, use `cloudopt export` to publish an updated JSON/CSV.
+See [REPORTER.md](REPORTER.md) for full status workflow documentation.
 
 ---
 

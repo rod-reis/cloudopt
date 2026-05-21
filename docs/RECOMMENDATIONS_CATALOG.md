@@ -28,26 +28,51 @@ All metrics analyzed by CloudOpt are sampled at **PT1H (hourly) granularity** ov
 
 ## 2. Confidence model
 
-CloudOpt scores every recommendation with one of three tiers. The rules are deterministic -- see `src/cloudopt/analyzer/confidence.py`.
+CloudOpt scores every recommendation with a **numeric confidence score (0–100)** and a derived tier. The scoring is deterministic — see `src/cloudopt/analyzer/detectors/__init__.py`.
 
-| Tier | When it's assigned | What it means for the customer |
+| Score | Tier | Readiness | What it means |
+|---|---|---|---|
+| **≥ 80** | **HIGH** | **READY** | Safe to action with normal change control. |
+| **50–79** | **MEDIUM** | **LIKELY** | Validate with the workload owner before actioning. |
+| **< 50** | **LOW** | **INSUFFICIENT** | Treat as a starting point for investigation. |
+
+**Score formula:**
+```
+score = base_score
+      + memory_quality_bonus   (0–15, based on memory data source quality)
+      + coverage_bonus         (0–10, based on metric time-series coverage %)
+      + corroboration_bonus    (0–20, 10 per extra data source beyond platform)
+      + stability_bonus        (0–5, no recent config change detected)
+      - change_impact_penalty  (0–20, high blast-radius proposed changes)
+```
+
+**Base scores by category:**
+
+| Category | Base | Notes |
 |---|---|---|
-| **HIGH** | (a) The signal comes from an **authoritative** Azure ARM API (orphan, power state, quota, reservation), **or** (b) An OS-agent or workload-aware enrichment CSV (Datadog / Splunk / Dynatrace / VM Insights) was supplied alongside platform metrics. | Safe to action with normal change-control. |
-| **MEDIUM** | The recommendation is **metric-dependent** (rightsize, SKU swap) but only Azure Monitor host-level data is available. The proxy memory metric (`Available Memory Bytes`) can be misleading. | Validate with the workload owner before actioning. |
-| **LOW** | Used for **CRR** findings -- the snapshot collection cannot verify the ">= 30 day" duration requirement. | Treat as a starting point for investigation. |
+| CLEANUP (orphans — ARG) | 90 | Authoritative, no metrics needed |
+| QUOTA (Quota API) | 90 | Authoritative, no metrics needed |
+| CRR (Capacity Reservation API) | 70 | Snapshot only; duration unverifiable |
+| DECOM non-idle (power state) | 90 | Authoritative ARM signal |
+| DCM-IDL-001 (idle detection) | 70 | Metric-dependent; can be elevated |
+| RSZ-*, SWP-* | 65 | Metric-dependent; elevated by enrichment |
+| QTA-OPS-001 | 90 | Authoritative; missing alerts are factual |
 
-**Authoritative categories** -- always HIGH:
-- `CLEANUP` (orphaned resources -- confirmed by ARG)
-- `QUOTA` (utilization comes from Quota API)
-- `CRR` flagging logic itself (but duration assumption keeps these LOW -- see Section 7)
-- `DECOM` (power state and idle detection -- `DCM-IDL-001` becomes MEDIUM if only platform metrics are present)
+**Corroboration sources that boost score (+10 each, max +20):**
+- OS-agent or workload-aware CSV (Datadog / Splunk / Dynatrace / VM Insights)
+- Workload archetype corroboration (e.g., `bursty` archetype confirming `RSZ-BSF-001`)
+- App Insights SLO data (availability p99 ≥ 99.9%)
 
-**Metric-dependent categories** -- MEDIUM by default, HIGH with OS/workload-aware enrichment:
-- `RIGHTSIZE` (all `RSZ-*` codes)
-- `SWAP` (all `SWP-*` codes)
+> **To unlock HIGH confidence on RSZ/SWP findings:** supply `os.cpu.used_percent` and `os.memory.used_percent` via the customer data CSV (see SPEC.md §5). Without OS-agent data, platform-only metrics cap these findings at MEDIUM.
 
-> **Blocker-to-HIGH message** (delivered on every MEDIUM finding):
-> *"Supply OS-level agent metrics (`os.cpu.percent` / `os.memory.used_percent`) via the canonical CSV export from Datadog / Splunk / Dynatrace / VM Insights to unlock HIGH confidence."*
+**Dashboard readiness filter reference:**
+
+| Readiness | Score | Suggested action |
+|---|---|---|
+| READY | ≥ 80 | Schedule with normal change control |
+| LIKELY | 50–79 | Validate metrics + workload context first |
+| INSUFFICIENT | < 50 | Investigate; collect more data |
+| DISCOVERY | n/a | Candidate flag — human evaluation required |
 
 ---
 
@@ -66,13 +91,12 @@ CloudOpt scores every recommendation with one of three tiers. The rules are dete
 | **Proposed SKU rules** | Same family/generation, smallest SKU that preserves the performance headroom targets above, supports same Accelerated Networking and Premium Storage capability, available in the VM's region. (Cost is a tiebreaker among performance-equivalent candidates, not the selector.) |
 | **Confidence** | MEDIUM (platform) -> HIGH (with os-agent or workload-aware enrichment) |
 
-#### `RSZ-UPS-001` -- Right-size up (more vCPU / memory, same family) -- *registry only, no detector yet*
+#### `RSZ-UPS-001` -- Right-size up (more vCPU / memory, same family)
 | | |
 |---|---|
-| **Status** | Reserved in the taxonomy; detector deferred pending OS-agent / APM enrichment input. |
-| **Why it matters** | Protects **performance** and **resiliency** when a workload is sustained-saturated on its current SKU. First-class concern -- not a deprioritized inverse of `RSZ-DWN-001`. |
-| **Why deferred** | A trustworthy upsize call requires confirmation of real saturation across CPU, memory, and queue / latency / IO wait. Azure Monitor's host-level `Available Memory Bytes` is too noisy on its own; the detector waits on guest-OS or APM enrichment (Datadog / Splunk / Dynatrace / New Relic / VM Insights / Prometheus). |
-| **Planned trigger (when shipped)** | `os.cpu.percent` P95 >= 85% **and** `os.memory.used_percent` P95 >= 85% sustained over the lookback window, with the recommendation **gated to HIGH only** (suppressed entirely if enrichment data is absent). |
+| **Trigger** | `os.cpu.used_percent` P95 ≥ 85% **or** `os.memory.used_percent` P95 ≥ 85% sustained over the lookback window. **Gated to HIGH only** — suppressed entirely if OS-agent enrichment data is absent (platform-only metrics are insufficient to safely prescribe an upsize). |
+| **Proposed SKU rules** | Same family/generation, smallest SKU that resolves the saturation. Supports same Accelerated Networking and Premium Storage capability, available in the VM's region. |
+| **Confidence** | HIGH (OS-agent data required; finding is suppressed at MEDIUM or LOW) |
 
 #### `RSZ-BSF-001` -- Burstable fit (D/E/F -> B-series)
 | | |
@@ -89,10 +113,12 @@ CloudOpt scores every recommendation with one of three tiers. The rules are dete
 | **Proposed** | Same-vCPU non-burstable SKU in D/E/F family. |
 | **Confidence** | MEDIUM -> HIGH with enrichment |
 
-#### `RSZ-DSK-001` -- Disk over/undersize -- *registry only, no detector yet*
+#### `RSZ-DSK-001` -- Disk over/undersize
 | | |
 |---|---|
-| **Status** | Reserved; CloudOpt does not yet evaluate managed-disk IOPS / size. |
+| **Trigger** | OS disk or data disk is provisioned significantly above or below the IOPS / throughput actually used over the lookback window, based on Azure Monitor disk metrics. |
+| **Proposed** | Right-sized disk tier (e.g. P30 → P20) or disk size that covers observed utilization with headroom. |
+| **Confidence** | MEDIUM → HIGH with OS-agent disk metrics |
 
 ---
 
@@ -119,15 +145,20 @@ CloudOpt scores every recommendation with one of three tiers. The rules are dete
 | **Capacity fallback** | When SKU catalog does not expose temp-disk limits, conservative defaults of **3,200 IOPS / 25 MB/s** are used (Standard local SSD). This biases the check toward *fewer* false positives. |
 | **Confidence** | MEDIUM -> HIGH with enrichment |
 
-#### `SWP-GEN-001` -- Generation swap (vN -> vN+k) -- *registry only*
+#### `SWP-GEN-001` -- Generation swap (vN → vN+k)
 | | |
 |---|---|
-| **Status** | Reserved; SWP-LFC-001 covers explicit retirements today. |
+| **Trigger** | Current SKU is ≥ 2 generations behind the latest available in the same family in the VM's region (e.g. D8s_v3 → D8s_v6). Latest generation is determined from the SKU catalog at collection time. |
+| **Proposed** | Same vCPU/memory shape, latest generation. |
+| **Note** | SWP-LFC-001 handles explicit Azure-published retirements. SWP-GEN-001 fires proactively for non-retiring-but-aging SKUs. |
+| **Confidence** | HIGH (catalog data is authoritative) |
 
-#### `SWP-DST-001` -- Disk tier swap (Premium -> Standard) -- *registry only*
+#### `SWP-DST-001` -- Disk tier swap (Premium → Standard)
 | | |
 |---|---|
-| **Status** | Reserved. |
+| **Trigger** | OS or data disk is on Premium SSD **and** observed IOPS + throughput over the lookback window are well within the Standard SSD tier limits for the same disk size. |
+| **Suppression** | Skip if the VM's SKU requires Premium Storage (e.g. `M` or `L` series VMs with Premium-required flag). |
+| **Confidence** | MEDIUM → HIGH with disk IOPS data from OS agent |
 
 #### `SWP-ARC-001` -- Architecture (x64 -> ARM64) -- **candidate, flag-only**
 | | |
@@ -193,10 +224,12 @@ All cleanup recommendations are **HIGH confidence** (sourced directly from Azure
 |---|---|
 | **Trigger** | All snapshots are surfaced for review (no time-based filter in the current build). |
 
-#### `CLN-RGP-001` -- Empty resource group -- *registry only*
+#### `CLN-RGP-001` -- Empty resource group
 | | |
 |---|---|
-| **Status** | Requires complete resource-group list which isn't yet in the `AzureResource` collection model. Deferred. |
+| **Trigger** | Resource group contains zero resources (VMs, disks, NICs, public IPs, or storage accounts). |
+| **Proposed** | Delete the resource group. |
+| **Confidence** | **HIGH** (sourced directly from Azure Resource Graph) |
 
 ---
 
@@ -210,6 +243,15 @@ Thresholds default to: **oversized** < 20%, **warning** 70-85%, **critical** > 8
 | **`QTA-WRN-001`** | 30-day max utilization 70-85% -> plan a future quota increase | HIGH |
 | **`QTA-CRI-001`** | Utilization > 85% -> request **individual** quota increase | HIGH |
 | **`QTA-CRG-001`** | Utilization > 85% **and** a donor subscription (< 40% util) exists in the same region/SKU -> **groupable** quota consolidation | HIGH |
+
+#### `QTA-OPS-001` -- Capacity Operations Hygiene
+| | |
+|---|---|
+| **Trigger** | One or more of 5 monitoring sub-checks fails for a subscription. See table below. |
+| **Scope** | Emitted **once per subscription**, not per VM. `vm_id` field carries the subscription resource path. |
+| **Confidence** | **HIGH / READY** (confidence_score = 90). Missing alerts are a factual, authoritative observation. |
+| **Sub-checks** | A: vCPU quota utilization metric alert • B: AllocationFailed/SkuNotAvailable activity-log alert • C: QuotaExceeded activity-log alert • D: CRG utilization alert *(only when CRGs exist)* • E: Service Health alert for Compute |
+| **deltas** | `{"subchecks": [{"label": "A: Quota alert", "pass": false, "why": "No metric alert found"}]}` |
 
 ---
 
@@ -229,14 +271,14 @@ Both CRR findings are **LOW** confidence -- snapshot collection cannot verify th
 | Code | Category | What it does | Default confidence |
 |---|---|---|---|
 | RSZ-DWN-001 | rightsize | Smaller SKU when CPU/mem low | MEDIUM |
-| RSZ-UPS-001 | rightsize | Larger SKU under sustained pressure | (reserved) |
+| RSZ-UPS-001 | rightsize | Larger SKU under sustained pressure | HIGH (OS-agent required) |
 | RSZ-BSF-001 | rightsize | D/E/F -> B-series when bursty/low | MEDIUM |
 | RSZ-BSM-001 | rightsize | B-series -> standard when over budget | MEDIUM |
-| RSZ-DSK-001 | rightsize | Disk over/undersize | (reserved) |
-| SWP-GEN-001 | swap | Newer generation, same family | (reserved) |
+| RSZ-DSK-001 | rightsize | Disk over/undersize | MEDIUM |
+| SWP-GEN-001 | swap | Newer generation, same family | HIGH |
 | SWP-FAM-001 | swap | Family swap by workload profile | MEDIUM |
 | SWP-LFC-001 | swap | Retiring SKU -> modern replacement | HIGH |
-| SWP-DST-001 | swap | Premium SSD -> Standard SSD | (reserved) |
+| SWP-DST-001 | swap | Premium SSD -> Standard SSD | MEDIUM |
 | SWP-DSK-001 | swap | Diskful -> Diskless SKU | MEDIUM |
 | SWP-ARC-001 | swap | x64 -> ARM64 candidate flag | DISCOVERY |
 | DCM-IDL-001 | decom | Idle running VM | MEDIUM |
@@ -247,16 +289,16 @@ Both CRR findings are **LOW** confidence -- snapshot collection cannot verify th
 | CLN-NIC-001 | cleanup | Unattached NIC | HIGH |
 | CLN-PIP-001 | cleanup | Unassociated public IP | HIGH |
 | CLN-SNP-001 | cleanup | Snapshot review | HIGH |
-| CLN-RGP-001 | cleanup | Empty resource group | (reserved) |
+| CLN-RGP-001 | cleanup | Empty resource group | HIGH |
 | QTA-OVR-001 | quota | Quota oversized (< 20% util) | HIGH |
 | QTA-WRN-001 | quota | Quota warning (70-85%) | HIGH |
 | QTA-CRI-001 | quota | Quota critical -- individual | HIGH |
 | QTA-CRG-001 | quota | Quota critical -- groupable | HIGH |
+| QTA-OPS-001 | quota | Capacity ops hygiene (per subscription) | HIGH |
 | CRR-UNU-001 | crr | Capacity Reservation Group unused | LOW |
 | CRR-UNF-001 | crr | CRG underfilled | LOW |
 
-**Implemented & active:** 18 recommendations + 1 candidate.
-**Reserved (taxonomy only):** 5 -- `RSZ-UPS-001`, `RSZ-DSK-001`, `SWP-GEN-001`, `SWP-DST-001`, `CLN-RGP-001`.
+**Implemented & active:** 25 recommendations + 1 candidate (26 codes total).
 
 ---
 
@@ -279,11 +321,13 @@ Both CRR findings are **LOW** confidence -- snapshot collection cannot verify th
 CloudOpt is a **Cloud Efficiency** tool. Frame findings around **performance fit, capacity posture, and resiliency**, not savings.
 
 1. **Lead with HIGH-confidence cleanup and quota recommendations.** They are sourced directly from Azure APIs and don't depend on monitoring quality. Cleanup matters because orphans distort capacity planning and operational hygiene; quota matters because exhausted quota blocks deployments and scale events.
-2. **For rightsize and swap recommendations, set expectations.** If the customer hasn't supplied an OS-agent or workload-aware CSV, every `RSZ-*` and `SWP-FAM-001` finding will be **MEDIUM** with an explicit blocker message. This is by design -- Azure's host-level `Available Memory Bytes` proxy is unreliable for performance-fit decisions.
+2. **For rightsize and swap recommendations, set expectations.** If the customer hasn't supplied an OS-agent or workload-aware CSV, every `RSZ-*` and `SWP-FAM-001` finding will be **MEDIUM** (score 50–79) with an explicit blocker message. This is by design — Azure's host-level `Available Memory Bytes` proxy is unreliable for performance-fit decisions. Supplying the OS-agent CSV unlocks HIGH confidence.
 3. **Burstable and diskless surface efficiency gains Azure Advisor's defaults often miss.** `RSZ-BSF-001` matches workloads to a credit model that better fits their performance profile; `SWP-DSK-001` removes a local-disk dependency that isn't being used. Both are about **fit**, not about being cheaper.
-4. **CRR findings are LOW by design.** They are a starting point for the capacity-planning conversation -- CloudOpt cannot verify the 30-day duration from a single snapshot, so use them to drive investigation, not action.
-5. **Discovery-only candidates** (`SWP-ARC-001`) should be framed as "worth investigating" -- never as a prescribed action.
-6. **Right-size up is a first-class concern.** When `RSZ-UPS-001` ships, it will be framed as protecting performance and resiliency under sustained pressure -- not as the opposite of right-size down.
+4. **CRR findings are LOW by design.** They are a starting point for the capacity-planning conversation — CloudOpt cannot verify the 30-day duration from a single snapshot, so use them to drive investigation, not action.
+5. **Discovery-only candidates** (`SWP-ARC-001`) should be framed as "worth investigating" — never as a prescribed action.
+6. **Right-size up is a first-class concern.** `RSZ-UPS-001` is framed as protecting performance and resiliency under sustained pressure — not as the opposite of right-size down. It requires OS-agent data to fire.
+7. **QTA-OPS-001 is about reducing blast radius.** Missing capacity alerts mean the customer has no early warning before quotas exhaust or allocation fails. Frame this as an operational maturity gap: the tool found the coverage holes; the fix is straightforward and high-leverage.
+8. **Use the confidence score histogram.** The dashboard Summary shows score distribution across all findings. A cluster of 65-score findings means the customer hasn't provided OS-agent data yet — use that as a conversation opener to unlock higher-confidence guidance.
 
 ---
 
@@ -293,10 +337,10 @@ CloudOpt is a **Cloud Efficiency** tool. Frame findings around **performance fit
 |---|---|---|
 | 30-minute (PT30M) metric granularity | Currently PT1H | PT30M would double data volume; PT1H is a deliberate trade-off |
 | Service Fabric / AKS reliability-tier awareness in VMSS recs | Not implemented | VMSS instance-count rec is generic |
-| Diskless temp-disk *size* utilization check | Not implemented | Azure Monitor doesn't emit temp-disk size-used as a metric -- IOPS + throughput are used as proxies |
+| Diskless temp-disk *size* utilization check | Not implemented | Azure Monitor doesn't emit temp-disk size-used as a metric — IOPS + throughput are used as proxies |
 | Per-hour B-series credit simulation | Long-run avg only | Simplified model; conservative |
 | App Service Plan orphan detection | Not in scope | Deferred |
-| DDoS Protection Plan orphan detection | Not in scope | Deferred |
+| RSZ-DSK-001 full disk IOPS analysis | Partial | Current detector uses tier-level thresholds; per-disk IOPS time-series requires AMA or OS agent |
 
 ---
 
