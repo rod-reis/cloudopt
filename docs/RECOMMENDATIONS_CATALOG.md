@@ -252,6 +252,7 @@ Thresholds default to: **oversized** < 20%, **warning** 70-85%, **critical** > 8
 | **Confidence** | **HIGH / READY** (confidence_score = 90). Missing alerts are a factual, authoritative observation. |
 | **Sub-checks** | A: vCPU quota utilization metric alert • B: AllocationFailed/SkuNotAvailable activity-log alert • C: QuotaExceeded activity-log alert • D: CRG utilization alert *(only when CRGs exist)* • E: Service Health alert for Compute |
 | **deltas** | `{"subchecks": [{"label": "A: Quota alert", "pass": false, "why": "No metric alert found"}]}` |
+| **Prerequisite** | Requires `cloudopt collect` to run with alert collection enabled (on by default). If the scorecard is empty, re-run `cloudopt collect` without `[collect_alerts] false` in the scope file. |
 
 ---
 

@@ -28,13 +28,13 @@ dependency set, so a standard `pip install -e .` covers everything.
 
 ```bash
 # 1. Generate Excel from the collected JSON
-cloudopt analyze --from output/cloudopt_report.json
+cloudopt analyze --from output/cloudopt_export_<timestamp>.json
 
 # 2. Open the workbook
-#    output/cloudopt_report.xlsx
+#    output/cloudopt_export_<timestamp>.xlsx
 
 # 3. (Optional) Browse data in a local web dashboard
-cloudopt dashboard --data output/cloudopt_report.xlsx
+cloudopt dashboard --data output/cloudopt_export_<timestamp>.xlsx
 ```
 
 ---
@@ -47,19 +47,30 @@ cloudopt dashboard --data output/cloudopt_report.xlsx
 cloudopt analyze --from <json_path> [OPTIONS]
 ```
 
-| Option                | Default                | Description                             |
-| --------------------- | ---------------------- | --------------------------------------- |
-| `--from`              | *(required)*           | Path to the `cloudopt_report.json` file |
-| `--output-dir` / `-o` | Same directory as JSON | Directory for the output `.xlsx` file   |
+| Option                | Default                | Description                                                                     |
+| --------------------- | ---------------------- | ------------------------------------------------------------------------------- |
+| `--from`              | *(required)*           | Path to the `cloudopt_export_<timestamp>.json` file                             |
+| `--output-dir` / `-o` | Same directory as JSON | Directory for the output `.xlsx` file                                           |
+| `--monitoring`        | —                      | Path to a CSV file with OS-level agent metrics (Datadog, Dynatrace, VM Insights) |
 
-The output file is named after the JSON stem: `cloudopt_report.json` → `cloudopt_report.xlsx`.
+The output file is named after the JSON stem: `cloudopt_export_20250701_123456.json` → `cloudopt_export_20250701_123456.xlsx`.
+
+During analysis the tool:
+1. Deserialises all VM inventory, metrics, quota data, and App Insights from the JSON.
+2. Loads capacity alert rules from the JSON (if collected with alert collection enabled) and passes them to the detector pipeline.
+3. Classifies workload archetypes for all VMs that have ≥ 48 hourly CPU data points.
+4. Runs all finding detectors and scores each finding with a confidence score.
+5. Generates the Excel workbook with an Executive Summary as the first sheet.
 
 ```bash
 # Basic usage
-cloudopt analyze --from output/cloudopt_report.json
+cloudopt analyze --from output/cloudopt_export_20250701_120000.json
 
 # Write workbook to a different directory
-cloudopt analyze --from output/cloudopt_report.json --output-dir /tmp/review
+cloudopt analyze --from output/cloudopt_export_20250701_120000.json --output-dir /tmp/review
+
+# Enrich with OS-level monitoring data to unlock HIGH confidence scores
+cloudopt analyze --from output/cloudopt_export_20250701_120000.json --monitoring monitoring.csv
 ```
 
 ---
@@ -70,14 +81,14 @@ cloudopt analyze --from output/cloudopt_report.json --output-dir /tmp/review
 cloudopt dashboard [OPTIONS]
 ```
 
-| Option          | Default                       | Description                |
-| --------------- | ----------------------------- | -------------------------- |
-| `--data`        | `output/cloudopt_report.xlsx` | Path to the Excel workbook |
-| `--port` / `-p` | `8080`                        | Local port                 |
-| `--host`        | `127.0.0.1`                   | Bind address               |
+| Option          | Default                                 | Description                |
+| --------------- | --------------------------------------- | -------------------------- |
+| `--data`        | `output/cloudopt_export_<timestamp>.xlsx` | Path to the Excel workbook |
+| `--port` / `-p` | `8080`                                  | Local port                 |
+| `--host`        | `127.0.0.1`                             | Bind address               |
 
 ```bash
-cloudopt dashboard --data output/cloudopt_report.xlsx
+cloudopt dashboard --data output/cloudopt_export_20250701_120000.xlsx
 # Browse to http://localhost:8080
 ```
 
@@ -103,10 +114,10 @@ cloudopt export --from output/cloudopt_report.xlsx [OPTIONS]
 
 ```bash
 # Export back to JSON after editing the workbook
-cloudopt export --from output/cloudopt_report.xlsx --format json
+cloudopt export --from output/cloudopt_export_20250701_120000.xlsx --format json
 
 # Export all sheets as CSV files
-cloudopt export --from output/cloudopt_report.xlsx --format csv --to output/csv
+cloudopt export --from output/cloudopt_export_20250701_120000.xlsx --format csv --to output/csv
 ```
 
 ---
@@ -159,14 +170,12 @@ RSZ-DWN-001:/subscriptions/abc12345.../resourceGroups/rg-prod/.../vm-web-01
 
 Status is stored in `<workbook_stem>_status.csv` alongside the workbook and is loaded automatically by `cloudopt dashboard`.
 
-See [REPORTER.md](REPORTER.md) for full status workflow documentation.
-
 ---
 
 ## Troubleshooting
 
 **`FileNotFoundError` on `cloudopt analyze`**  
-Verify the path passed to `--from` exists and points to a valid `cloudopt_report.json`.
+Verify the path passed to `--from` exists and points to a valid `cloudopt_export_<timestamp>.json`.
 
 **Workbook opens but sheets are empty**  
 Check that `cloudopt collect` completed without errors (exit code 0) and that the
@@ -174,7 +183,16 @@ JSON file is not zero-length.
 
 **Dashboard shows no data**  
 Ensure `--data` points to the `.xlsx` file, not the JSON. If you only have the
-JSON, run `cloudopt analyze --from cloudopt_report.json` first.
+JSON, run `cloudopt analyze --from cloudopt_export_<timestamp>.json` first.
+
+**Capacity hygiene scorecard shows all empty**  
+The JSON was collected without alert collection enabled. Re-run `cloudopt collect`
+(alert collection is on by default) to populate the scorecard. See [Collector.md](Collector.md).
+
+**All archetypes show `unknown` in the dashboard**  
+The JSON has insufficient metric data for classification. Workload archetypes require
+at least 48 hourly CPU data points per VM (≥2 days, ideally 14–30 days). Re-run
+`cloudopt collect --metrics-days 30` for reliable classification.
 
 **`openpyxl` not found**  
 Re-install using one of the methods in [HOW_TO.md](HOW_TO.md). The `openpyxl`

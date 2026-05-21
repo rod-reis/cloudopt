@@ -60,6 +60,9 @@ One row per subscription showing QTA-OPS-001 sub-check results:
 
 Each cell shows ✓ (pass) or ✗ (missing).
 
+> **Prerequisite:** Alert rule collection must be enabled during `cloudopt collect` (it is on by default).  
+> If the scorecard appears empty, re-run `cloudopt collect` without `[collect_alerts] false` in the scope file.
+
 ---
 
 ## Finding Status Workflow
@@ -150,7 +153,11 @@ The **Workload Archetypes** section (sidebar → Capacity Intelligence) shows ho
 | `dev-test-irregular` | Tagged dev/test/qa environment with irregular patterns |
 | `unknown` | Insufficient data (fewer than 48 hourly data points) |
 
-Classification uses 30-day hourly CPU time-series. Where App Insights SLO data (availability ≥ 99.9% p99) is present, it corroborates recommendations with an additional evidence source.
+Classification uses hourly CPU time-series from the JSON. Where App Insights SLO data (availability ≥ 99.9% p99) is present, it corroborates recommendations with an additional evidence source.
+
+> **Prerequisite:** Archetypes require ≥ 48 hourly CPU data points per VM.  
+> Collect with `--metrics-days 2` minimum; **14–30 days recommended** for reliable pattern detection.  
+> If all archetypes show `unknown`, re-run `cloudopt collect --metrics-days 30`.
 
 ---
 

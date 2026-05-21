@@ -2537,6 +2537,97 @@ def _read_recommendations_sheet(wb) -> list[VmRecommendation]:
     return recs
 
 
+def _read_findings_from_decisions_sheet(wb) -> list:
+    """Deserialise pre-computed Finding objects from the 'Decisions' sheet.
+
+    Returns an empty list when the sheet is absent, has no data rows, or the
+    header does not match the expected Phase-B format.  Callers should fall
+    back to running the detector pipeline when an empty list is returned.
+
+    Column order written by _sheet_decisions:
+      0 Code | 1 Category | 2 Subcategory | 3 Status | 4 ResourceID
+      5 Readiness | 6 Confidence | 7 Score | 8 Evidence Sources
+      9 Current | 10 Proposed | 11 Rationale | 12 Blockers to High
+      13 Customer Inputs
+    """
+    if "Decisions" not in wb.sheetnames:
+        return []
+    ws = wb["Decisions"]
+    rows = list(ws.iter_rows(values_only=True))
+    if len(rows) < 2:
+        return []
+    # Validate header to distinguish Phase-B "Decisions" from legacy format
+    if not rows[0] or str(rows[0][0] or "").strip() != "Code":
+        return []
+
+    from cloudopt.analyzer.taxonomy import Category, SubCategory, Readiness, Confidence
+    from cloudopt.models import Finding, FindingType
+
+    _cat_map = {c.value: c for c in Category}
+    _sub_map = {s.value: s for s in SubCategory}
+    _rdy_map = {r.value: r for r in Readiness}
+    _conf_map = {c.value: c for c in Confidence}
+
+    findings: list = []
+    for row in rows[1:]:
+        if not any(row):
+            continue
+        code = str(row[0] or "").strip()
+        # Skip separator rows and Advisor section headers
+        if not code or code.startswith("━") or code.startswith("─") or code.startswith("="):
+            continue
+        try:
+            category = _cat_map.get(str(row[1] or "").strip().lower(), Category.RIGHTSIZE)
+            subcategory = _sub_map.get(str(row[2] or "").strip().lower(), SubCategory.DOWNSIZE)
+            vm_id = str(row[4] or "").strip()
+            readiness = _rdy_map.get(str(row[5] or "").strip().lower(), Readiness.INSUFFICIENT)
+            conf_str = str(row[6] or "").strip().lower()
+            confidence = _conf_map.get(conf_str) if conf_str else None
+            score_raw = row[7]
+            confidence_score = int(score_raw) if score_raw is not None and str(score_raw).strip().isdigit() else None
+            ev_str = str(row[8] or "").strip()
+            evidence_sources = [s.strip() for s in ev_str.split(" | ") if s.strip()]
+            current = str(row[9] or "").strip() or None
+            proposed = str(row[10] or "").strip() or None
+            rationale = str(row[11] or "").strip()
+            bl_str = str(row[12] or "").strip()
+            blockers = [s.strip() for s in bl_str.split(" | ") if s.strip()]
+            ci_str = str(row[13] or "").strip() if len(row) > 13 else ""
+            customer_inputs = [s.strip() for s in ci_str.split(" | ") if s.strip()]
+            findings.append(Finding(
+                vm_id=vm_id,
+                code=code,
+                category=category,
+                subcategory=subcategory,
+                finding_type=FindingType.RECOMMENDATION,
+                readiness=readiness,
+                confidence=confidence,
+                confidence_score=confidence_score,
+                current=current,
+                proposed=proposed,
+                rationale=rationale,
+                evidence_sources=evidence_sources,
+                blockers_to_high=blockers,
+                customer_inputs_needed=customer_inputs,
+                deltas={},
+            ))
+        except Exception:
+            continue
+    return findings
+
+
+def read_findings_from_workbook(path: Path) -> list:
+    """Read pre-computed Finding objects from the 'Decisions' sheet of a workbook.
+
+    Returns an empty list when unavailable so the caller can fall back to the
+    offline detector pipeline.
+    """
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    findings = _read_findings_from_decisions_sheet(wb)
+    wb.close()
+    return findings
+
+
 def _read_metadata_sheet(wb) -> CollectionMetadata:
     from cloudopt.models import CollectionMetadata, CollectionThresholds
 

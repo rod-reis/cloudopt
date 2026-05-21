@@ -22,12 +22,12 @@ web dashboard — without requiring any Azure access on the analyst's machine.
 flowchart LR
     subgraph Customer["Customer (Azure access required)"]
         A[az login] --> B[cloudopt collect]
-        B --> C[(cloudopt_report.json)]
+        B --> C[(cloudopt_export_timestamp.json)]
     end
 
     subgraph Engineer["Engineer (no Azure access needed)"]
         C --> D[cloudopt analyze]
-        D --> E[(cloudopt_report.xlsx)]
+        D --> E[(cloudopt_export_timestamp.xlsx)]
         E --> F[cloudopt dashboard]
         F --> G[Browser\nhttp://localhost:8080]
         E --> H[cloudopt export]

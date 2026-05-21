@@ -441,6 +441,9 @@ def _load(path: Path) -> None:
 
 
 def _load_excel(path: Path) -> None:
+    import logging as _logging
+    _logger = _logging.getLogger(__name__)
+
     vms, metrics, recommendations, metadata = read_workbook(path)
     quota = read_quota_from_workbook(path)
     _store(vms, metrics, recommendations, metadata, quota)
@@ -450,28 +453,43 @@ def _load_excel(path: Path) -> None:
     # Workload archetype enrichment (no AI metrics available from Excel)
     from cloudopt.analyzer.archetype import enrich_vm_archetype
     enrich_vm_archetype(vms, metrics)
-    # Run detector pipeline so findings are available
-    from cloudopt.analyzer.detectors import run_all
-    from cloudopt.analyzer.sku_catalog import OfflineSkuCatalog
-    meta = _DATA.get("metadata")
-    thresholds = meta.thresholds if meta else None
-    try:
-        from cloudopt.models import CollectionThresholds
-        if thresholds is None:
-            thresholds = CollectionThresholds()
-        findings = run_all(
-            vms=vms,
-            metrics=metrics,
-            quota_items=_DATA.get("quota", []),
-            thresholds=thresholds,
-            catalog=OfflineSkuCatalog(),
-            resources=None,
-            rsvp_orders=_DATA.get("reservations", []),
-            crg_items=[],
-            enriched_map=None,
-        )
-    except Exception:
-        findings = []
+
+    # Prefer pre-computed findings from the 'Decisions' sheet (produced with the
+    # live SKU catalog at analysis time).  These include generation-swap and
+    # rightsize findings that the offline catalog cannot produce.
+    from cloudopt.export.excel import read_findings_from_workbook
+    findings = read_findings_from_workbook(path)
+
+    if not findings:
+        # Fallback: re-run detectors with the offline no-op catalog.  Only
+        # catalog-independent rules (legacy-SKU, stopped/idle VM, quota) will
+        # fire.  Log any exception so silent failures become diagnosable.
+        from cloudopt.analyzer.detectors import run_all
+        from cloudopt.analyzer.sku_catalog import OfflineSkuCatalog
+        meta = _DATA.get("metadata")
+        thresholds = meta.thresholds if meta else None
+        try:
+            from cloudopt.models import CollectionThresholds
+            if thresholds is None:
+                thresholds = CollectionThresholds()
+            findings = run_all(
+                vms=vms,
+                metrics=metrics,
+                quota_items=_DATA.get("quota", []),
+                thresholds=thresholds,
+                catalog=OfflineSkuCatalog(),
+                resources=None,
+                rsvp_orders=_DATA.get("reservations", []),
+                crg_items=[],
+                enriched_map=None,
+            )
+        except Exception as _exc:
+            _logger.warning(
+                "run_all failed while loading Excel workbook '%s'; findings will be empty. Error: %s",
+                path, _exc,
+            )
+            findings = []
+
     _DATA["findings"] = findings
     _load_findings_status(path)
     _DATA["vmss_groups"] = read_vmss_groups_from_workbook(path)
@@ -780,7 +798,10 @@ def _build_overview(
             if vm:
                 vcpu_opportunity += vm.vcpus
 
-    generation_gap_count = sum(1 for f in recs if f.code.startswith("SWP-GEN-"))
+    generation_gap_count = sum(
+        1 for f in recs
+        if f.code.startswith("SWP-GEN-") or f.code.startswith("SWP-LFC-")
+    )
 
     hist_buckets = [
         "0-10", "10-20", "20-30", "30-40", "40-50",

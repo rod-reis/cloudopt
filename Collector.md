@@ -2,7 +2,8 @@
 
 The **Collector** is the first phase of the cloudopt workflow. It runs on any machine
 with Azure access (including Azure Cloud Shell) and produces a single JSON file that
-captures VM inventory, performance metrics, quota utilization, and Azure Advisor findings.
+captures VM inventory, performance metrics, quota utilization, Azure Advisor findings,
+Azure Monitor alert rules, and workload archetype classifications.
 
 > **Read-only** — the collector never writes to Azure resources.  
 > **Cloud Shell compatible** — no Excel dependency; runs in Python 3.11+ environments.
@@ -24,10 +25,12 @@ cloudopt collect [OPTIONS]
 | `--regions` / `--locations` / `-r` | all regions    | ARM region name(s), e.g. `eastus`. Repeatable. **Global filter** — applied to inventory, App Insights, Advisor, and quota queries.                              |
 | `--resource-groups` / `-g`         | all RGs        | Full ARM RG IDs, e.g. `/subscriptions/<guid>/resourceGroups/RG1`. Repeatable. Each RG must reference a subscription that is in scope.                           |
 | `--tags`                           | —              | Tag filter expression(s). Operators: `\|\|` = OR, `=~` = equals, `!~` = not equals. Repeatable. **Tag values are used in-memory only and are never persisted.** |
-| `--metrics-days` / `-d`            | `30`           | Days of metrics history (1–90).                                                                                                                                 |
+| `--metrics-days` / `-d`            | `30`           | Days of metrics history (1–90). Minimum 2 days needed for workload archetype classification (≥48 hourly points). Use 14+ days for reliable pattern detection.   |
 | `--output` / `-o`                  | `output/`      | Directory for output files.                                                                                                                                     |
 | `--dry-run`                        | off            | Count resources and show summary, but skip collection.                                                                                                          |
-| `--concurrency`                    | `5`            | Max concurrent Azure Monitor API calls per subscription (1–50).                                                                                                 |
+| `--concurrency`                    | `25`           | Max concurrent Azure Monitor API calls per subscription (1–100).                                                                                                |
+| `--arm-rate`                       | `20.0`         | Target ARM read requests per second per subscription (1.0–100.0). Lower this if you hit 429 errors.                                                             |
+| `--debug`                          | off            | Print per-step timing, total elapsed time, and enable verbose logging.                                                                                          |
 
 ---
 
@@ -95,6 +98,9 @@ cloudopt collect --dry-run
 
 # Write output to a custom directory
 cloudopt collect --output /tmp/azure-report
+
+# Enable per-step timing output
+cloudopt collect --debug
 ```
 
 ---
@@ -133,12 +139,42 @@ Owner!~Bill
 [concurrency]
 8
 
+[armrate]
+20
+
 [output]
 ./capacity-out
+
+# Collect Azure Monitor alert rules for capacity ops hygiene (QTA-OPS-001).
+# Disable to speed up collection when alert data is not needed.
+[collect_alerts]
+true
+
+# Print per-step timing (equivalent to --debug flag)
+[debug]
+false
+
+# Count resources only, skip collection (equivalent to --dry-run flag)
+[dryrun]
+false
 ```
 
-Aliases recognised: `[tenant]`, `[subscriptions]`, `[regions]`,
-`[resourcegroup]`, `[metric_days]`, `[outputdir]`.
+### All recognised section names
+
+| Section | Aliases | CLI flag equivalent |
+|---|---|---|
+| `[tenantid]` | `[tenant]` | `--tenant-id` |
+| `[subscriptionids]` | `[subscriptions]` | `--subscriptions` |
+| `[locations]` | `[regions]` | `--regions` / `--locations` |
+| `[resourcegroups]` | `[resourcegroup]` | `--resource-groups` |
+| `[tags]` | — | `--tags` |
+| `[metricdays]` | `[metric_days]` | `--metrics-days` |
+| `[concurrency]` | — | `--concurrency` |
+| `[armrate]` | `[arm_rate]`, `[armratepersecond]` | `--arm-rate` |
+| `[output]` | `[outputdir]` | `--output` |
+| `[collect_alerts]` | `[collectalerts]` | *(config only — default: true)* |
+| `[debug]` | — | `--debug` |
+| `[dryrun]` | `[dry_run]` | `--dry-run` |
 
 ---
 
@@ -199,17 +235,57 @@ Quota alert threshold (utilization %)  [80.0]:
 ```
 
 These thresholds are stored in the JSON output so the engineer can reference them
-when authoring optimizations in the Excel workbook.
+when reviewing findings in the Excel workbook or dashboard.
 
 ---
 
 ## ARM rate-limit safety
 
 Subscriptions are always processed **one at a time**. Within each subscription, work
-is dispatched in batches of `--concurrency` (default **5**). This keeps in-flight ARM
+is dispatched in batches of `--concurrency` (default **25**). This keeps in-flight ARM
 API requests low even when scanning thousands of VMs across hundreds of subscriptions.
 The built-in `ThrottleManager` automatically halves concurrency and respects
 `Retry-After` headers on transient 429 responses.
+
+---
+
+## Collection steps
+
+The `collect` command runs the following steps in order:
+
+| Step | Description |
+|---|---|
+| 1 | Authenticate to Azure via `DefaultAzureCredential` |
+| 2 | Enumerate in-scope subscriptions |
+| 3 | Collect VM + VMSS inventory via Resource Graph KQL |
+| 4 | Collect App Insights inventory |
+| 5 | Collect App Insights standard and JVM metrics |
+| 6 | Collect capacity quota utilization per subscription/region |
+| 7a | Collect Azure Advisor SKU-change recommendations |
+| 7b | Collect availability-zone logical→physical mappings |
+| 7c | Collect zone mappings |
+| 7d | Collect full resource inventory (all ARM types, for cleanup detectors) |
+| 7d-ii | Collect empty resource groups (CLN-RGP-001) |
+| 7e | Collect VM stop history from Activity Log (stopped/deallocated VMs only) |
+| 7f | Collect VMSS Uniform group inventory and CPU metrics |
+| 7g | Resolve VMSS parent services (AKS, AVD, etc.) |
+| **7h** | **Collect Azure Monitor alert rules** (quota, allocation failure, service health) |
+| **7i** | **Classify workload archetypes** from hourly CPU patterns |
+| 8 | Write `cloudopt_export_<timestamp>.json` |
+
+Steps 7h and 7i are the inputs that power the **Capacity Ops Hygiene** scorecard
+(`QTA-OPS-001`) and the **Workload Archetypes** dashboard section respectively.
+
+### Disabling alert collection
+
+Alert rule collection (Step 7h) makes additional Azure Resource Graph calls across all
+subscriptions. If you want a faster run and don't need the hygiene scorecard, disable it:
+
+```ini
+# In your scope file:
+[collect_alerts]
+false
+```
 
 ---
 
@@ -225,8 +301,8 @@ regardless of OS type or agent installation state.
 
 > **Scope of current metrics:** Because these are host-level counters, memory is
 > limited to a single `Available Memory Bytes` value. Richer sources such as
-> VM Insights (AMA), Datadog, or Splunk will be added as separate optional
-> collectors in future releases.
+> VM Insights (AMA), Datadog, or Splunk are provided via the optional monitoring
+> CSV (`cloudopt analyze --monitoring`).
 
 | Metric                                    | Description                                          |
 | ----------------------------------------- | ---------------------------------------------------- |
@@ -238,6 +314,42 @@ regardless of OS type or agent installation state.
 
 Also collected: VM inventory (SKU, vCPUs, memory, region, zones, OS image, power state,
 disk layout, NIC count, VMSS / availability-set membership).
+
+### Workload Archetype Classification
+
+After metrics are collected, cloudopt classifies every VM's CPU pattern into one
+of 7 archetypes using ≥48 hourly data points (requires `--metrics-days 2` minimum;
+14–30 days recommended for reliable classification):
+
+| Archetype | Signal |
+|---|---|
+| `steady-24x7` | Low CV (< 0.2) — consistent load around the clock |
+| `business-hours` | Weekday-work-hour mean ÷ off-hour mean > 3.0 |
+| `weekend-idle` | Weekday mean ÷ weekend mean > 4.0 |
+| `bursty` | P95/P50 > 2.5 AND CV ≥ 0.5 |
+| `spiky` | P99/P95 > 1.8 |
+| `dev-test-irregular` | ≥ 20% near-zero CPU readings AND CV > 0.8 |
+| `unknown` | Insufficient data (< 48 hourly data points) |
+
+Archetypes are stored in the JSON and used by the detector pipeline to corroborate
+findings (e.g., `bursty` confirms a burstable-fit recommendation) and are shown in the
+**Workload Archetypes** section of the dashboard.
+
+### Azure Monitor Alert Rules (Capacity Ops Hygiene)
+
+Collected via Resource Graph across all in-scope subscriptions. These are used by the
+`QTA-OPS-001` detector to assess whether each subscription has the minimum monitoring
+coverage for capacity operations:
+
+| Sub-check | What is checked |
+|---|---|
+| A: Quota Alert | Metric alert on vCPU quota utilization |
+| B: Alloc Failure Alert | Activity log alert for `AllocationFailed` / `SkuNotAvailable` |
+| C: QuotaExceeded Alert | Activity log alert for `QuotaExceeded` |
+| D: CRR Alert | CRG utilization alert (only when CRGs exist in that subscription) |
+| E: Service Health | Service Health alert for the `Compute` category |
+
+Disable with `[collect_alerts] false` in your scope file if not needed.
 
 ### Application Insights — Standard metrics
 
@@ -280,16 +392,16 @@ Compute core quota usage per subscription and region, included in the
 
 After a successful `cloudopt collect`, the output directory contains:
 
-| File                   | Description                                             |
-| ---------------------- | ------------------------------------------------------- |
-| `cloudopt_report.json` | All collected data in JSON with masked subscription IDs |
-| `.checkpoint.json`     | Internal resume file; deleted after a successful run    |
+| File                              | Description                                             |
+| --------------------------------- | ------------------------------------------------------- |
+| `cloudopt_export_<timestamp>.json` | All collected data in JSON with masked subscription IDs |
+| `.checkpoint.json`                | Internal resume file; deleted after a successful run    |
 
 > **Subscription IDs** are partially masked (first 8 characters only) to reduce
 > accidental data exposure when sharing the JSON file.
 
-Share `cloudopt_report.json` with the engineer who will generate the Excel workbook.
-See [ANALYZER.md](ANALYZER.md).
+Share `cloudopt_export_<timestamp>.json` with the engineer who will generate the Excel workbook.
+See [ANALYZER.md](Analyzer.md).
 
 ---
 
@@ -304,18 +416,25 @@ Your account may lack Reader access on one or more subscriptions.
 Use `--subscriptions` or `--subscriptions-file` to target only subscriptions
 you have access to.
 
+**All archetypes show `unknown`**  
+The VM has fewer than 48 hourly CPU data points. Increase `--metrics-days`
+to at least 2 (48 points); 14+ days is recommended for reliable classification.
+
 **JVM metrics not appearing**  
 JVM metrics require the App Insights component to be workspace-based
 (non-classic ingestion) and your identity to have **Log Analytics Reader** on
 the linked workspace. Classic components will show only standard metrics.
 
+**Capacity hygiene scorecard shows no data**  
+Alert collection may have been disabled (`[collect_alerts] false`), or the
+JSON was collected with an older version of cloudopt. Re-run `cloudopt collect`
+to populate alert rule data.
+
 **Slow collection / throttle errors**  
-Lower `--concurrency` if you see persistent 429 responses. The `ThrottleManager`
-will also self-regulate by halving concurrency automatically on throttle signals.
+Lower `--concurrency` or `--arm-rate` if you see persistent 429 responses. The
+`ThrottleManager` will also self-regulate by halving concurrency automatically on
+throttle signals.
 
 **Interrupted run**  
 A `.checkpoint.json` file in the output directory tracks completed VMs.
 Re-run the exact same `cloudopt collect` command to resume from where it stopped.
-3. Add corresponding Pydantic models to `models.py`
-4. Write mocked unit tests in `tests/` (mock the Azure SDK clients, not HTTP)
-5. Export new data in `export/json_export.py`
