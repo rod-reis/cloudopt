@@ -133,6 +133,25 @@ class MemoryQuality(str, Enum):
 
 
 # ---------------------------------------------------------------------------
+# Workload archetype
+# ---------------------------------------------------------------------------
+
+class WorkloadArchetype(str, Enum):
+    """Behavioural archetype derived from the hourly CPU time-series.
+
+    Produced by the Phase 4 archetype classifier (analyzer/archetype.py).
+    UNKNOWN is the default when insufficient time-series data exists.
+    """
+    UNKNOWN = "unknown"
+    STEADY_24X7 = "steady-24x7"
+    BUSINESS_HOURS = "business-hours"
+    WEEKEND_IDLE = "weekend-idle"
+    BURSTY = "bursty"
+    SPIKY = "spiky"
+    DEV_TEST_IRREGULAR = "dev-test-irregular"
+
+
+# ---------------------------------------------------------------------------
 # Managed-compute parentage
 # ---------------------------------------------------------------------------
 
@@ -208,6 +227,11 @@ class VmInventory(BaseModel):
     memory_quality: MemoryQuality = MemoryQuality.MISSING
     mem_pressure_score: Optional[float] = None   # 1 − (available_min_bytes / total_memory_bytes)
     memory_disagreement_pct: Optional[float] = None  # |platform% − customer%| when > 10 %
+
+    # Workload archetype and role inference (populated at analysis time — Phase 4 §4.1/§4.2)
+    workload_archetype: WorkloadArchetype = WorkloadArchetype.UNKNOWN
+    inferred_workload_role: Optional[str] = None  # e.g. "sql", "nginx" — corroboration only
+    appinsights_corroboration: int = 0  # +1 if a healthy App Insights component exists in same RG
 
     # Full ``properties`` payload as returned by Azure Resource Graph for the
     # resources table.  Stored verbatim so consumers have access to every

@@ -41,7 +41,11 @@ from cloudopt.models import (
     QuotaItem,
     VmInventory,
     VmMetrics,
+    WorkloadArchetype,
 )
+
+# Archetypes that strongly corroborate a burstable-fit recommendation
+_BURSTABLE_POSITIVE_ARCHETYPES = {WorkloadArchetype.BURSTY, WorkloadArchetype.BUSINESS_HOURS}
 
 # SKU families eligible for a burstable recommendation (D, E, F)
 _ELIGIBLE_FAMILIES = ("standard_d", "standard_e", "standard_f")
@@ -84,6 +88,7 @@ def _evaluate(
     cpu_avgs: list[float] = []
     cpu_p95s: list[float] = []
     has_accel_net: bool = False
+    archetype_corroboration: int = 0
 
     for vm in group.members:
         vm_met = metrics_by_vm.get(vm.resource_id, {})
@@ -97,6 +102,9 @@ def _evaluate(
         sku_spec = catalog.get(vm.subscription_id, vm.region, vm.vm_sku)
         if sku_spec and sku_spec.accelerated_networking:
             has_accel_net = True
+
+        if vm.workload_archetype in _BURSTABLE_POSITIVE_ARCHETYPES:
+            archetype_corroboration = 1
 
     if not cpu_avgs:
         return out
@@ -118,8 +126,18 @@ def _evaluate(
             and _bseries_credits_sufficient(cpu_avg, vcpus, lookback)
         ):
             proposed = f"Standard_B{vcpus}ms (or equivalent B-series with {vcpus} vCPUs)"
-            kwargs = _rec_kwargs(enriched=group_enriched, category=Category.RIGHTSIZE)
+            kwargs = _rec_kwargs(
+                enriched=group_enriched,
+                category=Category.RIGHTSIZE,
+                corroboration_sources=archetype_corroboration,
+            )
             kwargs["deltas"] = {"signal": "burstable-fit"}
+            archetype_note = (
+                f" Workload archetype '{group.members[0].workload_archetype.value}' "
+                "independently corroborates bursty behaviour."
+                if archetype_corroboration
+                else ""
+            )
             out.append(
                 Finding(
                     vm_id=group.parent_id if group.is_aggregated else group.members[0].resource_id,
@@ -134,7 +152,7 @@ def _evaluate(
                         f"P95 CPU {cpu_p95:.1f}% < {2 * baseline:.0f}% (2× baseline). "
                         "AcceleratedNetworking is not enabled. "
                         "The B-series credit model is sufficient to support this workload "
-                        "at lower cost."
+                        f"at lower cost.{archetype_note}"
                     ),
                     **kwargs,
                 )

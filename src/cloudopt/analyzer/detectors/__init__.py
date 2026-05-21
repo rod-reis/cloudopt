@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from cloudopt.analyzer.archetype import enrich_vm_archetype
 from cloudopt.analyzer.detectors import (
     burstable,
     cleanup,
@@ -35,6 +36,7 @@ from cloudopt.analyzer.detectors._shared import enrich_vm_memory_quality
 from cloudopt.analyzer.sku_catalog import SkuCatalog
 from cloudopt.enrichment.schema import EnrichedVmMetrics
 from cloudopt.models import (
+    AppInsightsMetrics,
     AzureResource,
     CapacityReservationGroup,
     CollectionThresholds,
@@ -60,24 +62,30 @@ def run_all(
     rsvp_orders: Optional[list] = None,  # unused, kept for backward compat
     crg_items: Optional[list[CapacityReservationGroup]] = None,
     enriched_map: Optional[dict[str, EnrichedVmMetrics]] = None,
+    ai_metrics_by_resource: Optional[dict[str, list[AppInsightsMetrics]]] = None,
 ) -> list[Finding]:
     """Run every registered detector and return the combined Finding list.
 
     Args:
-        vms:                   VM inventory records.
-        metrics:               Platform metrics records.
-        quota_items:           Quota utilisation records.
-        thresholds:            Detection thresholds (see CollectionThresholds).
-        catalog:               SKU catalog used for right-size candidate lookup.
-        resources:             Optional orphaned-resource list for cleanup detectors.
-        empty_resource_groups: Optional empty resource groups (CLN-RGP-001).
-        enable_dlc:            Enable DCM-DLC-001 (lower-env oversized) detector.
-        enable_env_check:      Enable DCM-ENV-001 (missing env-tag) detector.
-        crg_items:             Optional Capacity Reservation Groups (§2.6 detectors).
+        vms:                     VM inventory records.
+        metrics:                 Platform metrics records.
+        quota_items:             Quota utilisation records.
+        thresholds:              Detection thresholds (see CollectionThresholds).
+        catalog:                 SKU catalog used for right-size candidate lookup.
+        resources:               Optional orphaned-resource list for cleanup detectors.
+        empty_resource_groups:   Optional empty resource groups (CLN-RGP-001).
+        enable_dlc:              Enable DCM-DLC-001 (lower-env oversized) detector.
+        enable_env_check:        Enable DCM-ENV-001 (missing env-tag) detector.
+        crg_items:               Optional Capacity Reservation Groups (§2.6 detectors).
+        enriched_map:            Optional OS/AMA enrichment metrics by resource ID.
+        ai_metrics_by_resource:  Optional Application Insights metrics keyed by
+                                 App Insights resource ID; used for SLO corroboration.
     """
     out: list[Finding] = []
     # Phase 3: populate memory_quality, mem_pressure_score per VM before detectors run
     enrich_vm_memory_quality(vms, metrics, enriched_map=enriched_map)
+    # Phase 4: populate workload_archetype, inferred_workload_role, appinsights_corroboration
+    enrich_vm_archetype(vms, metrics, ai_metrics_by_resource=ai_metrics_by_resource)
     out.extend(rightsize.detect(vms, metrics, quota_items, thresholds, catalog, enriched_map=enriched_map))
     out.extend(burstable.detect(vms, metrics, quota_items, thresholds, catalog, enriched_map=enriched_map))
     out.extend(diskless.detect(vms, metrics, quota_items, thresholds, catalog, enriched_map=enriched_map))
