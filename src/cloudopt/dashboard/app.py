@@ -38,7 +38,120 @@ _DATA: dict[str, Any] = {
     "findings": [],
     "source_coverage": [],
     "vmss_groups": [],
+    "findings_status": {},
 }
+
+
+# ---------------------------------------------------------------------------
+# Phase 6/7 helper functions
+# ---------------------------------------------------------------------------
+
+def _build_waterfall(vms, findings):
+    """Return vCPU waterfall data for the Capacity Recovery chart."""
+    from cloudopt.analyzer.taxonomy import Readiness, Category
+    total_running_vcpu = sum(v.vcpus for v in vms if not _is_stopped(v))
+
+    ready_recs = [f for f in findings if f.readiness == Readiness.READY and f.finding_type.value == "recommendation"]
+
+    downsize_vcpu = sum(
+        abs(f.deltas.get("vcpu", 0) or 0)
+        for f in ready_recs
+        if f.category == Category.RIGHTSIZE and f.proposed
+        and (f.deltas.get("vcpu", 0) or 0) < 0
+    )
+
+    decom_vcpu = sum(
+        abs(f.deltas.get("vcpu", 0) or 0)
+        for f in ready_recs
+        if f.category == Category.DECOM
+    )
+
+    return {
+        "current_vcpu": total_running_vcpu,
+        "downsize_recovery": int(downsize_vcpu),
+        "decom_recovery": int(decom_vcpu),
+        "remaining": max(0, total_running_vcpu - int(downsize_vcpu) - int(decom_vcpu)),
+    }
+
+
+def _build_archetypes(vms):
+    """Return archetype distribution and VM list."""
+    dist = {}
+    vm_list = []
+    for vm in vms:
+        arch = vm.workload_archetype.value if hasattr(vm, 'workload_archetype') else "unknown"
+        dist[arch] = dist.get(arch, 0) + 1
+        vm_list.append({
+            "vm_name": vm.vm_name,
+            "subscription_name": vm.subscription_name,
+            "resource_group": vm.resource_group,
+            "vm_sku": vm.vm_sku,
+            "vcpus": vm.vcpus,
+            "archetype": arch,
+            "inferred_role": vm.inferred_workload_role if hasattr(vm, 'inferred_workload_role') else None,
+        })
+    return {"distribution": dist, "vms": vm_list}
+
+
+def _build_capacity_hygiene(findings):
+    """Return per-subscription QTA-OPS-001 sub-check results."""
+    hygiene_findings = [f for f in findings if f.code == "QTA-OPS-001"]
+    result = []
+    for f in hygiene_findings:
+        sub_id = f.vm_id.replace("/subscriptions/", "").split("/")[0]
+        subchecks = f.deltas.get("subchecks", []) if f.deltas else []
+        row = {"subscription": sub_id, "overall": "fail" if subchecks else "pass"}
+        for check in subchecks:
+            label = check.get("label", "")
+            passed = check.get("pass", False)
+            if label.startswith("A:"): row["a"] = passed
+            elif label.startswith("B:"): row["b"] = passed
+            elif label.startswith("C:"): row["c"] = passed
+            elif label.startswith("D:"): row["d"] = passed
+            elif label.startswith("E:"): row["e"] = passed
+        result.append(row)
+    return result
+
+
+def _build_quick_wins(findings, top=10):
+    """Return top N findings sorted by confidence_score x |vcpu_delta|."""
+    from cloudopt.analyzer.taxonomy import Readiness
+    scored = []
+    for f in findings:
+        if f.readiness != Readiness.READY:
+            continue
+        score = f.confidence_score or 0
+        vcpu_delta = abs(f.deltas.get("vcpu", 0) or 0) if f.deltas else 0
+        priority = score * max(vcpu_delta, 1)
+        scored.append((priority, f))
+    scored.sort(key=lambda x: -x[0])
+    result = []
+    for priority, f in scored[:top]:
+        result.append({
+            "finding_id": f"{f.code}:{f.vm_id}",
+            "code": f.code,
+            "vm_id": f.vm_id,
+            "category": f.category.value,
+            "current": f.current,
+            "proposed": f.proposed,
+            "rationale": (f.rationale or "")[:200],
+            "confidence_score": f.confidence_score,
+            "confidence": f.confidence.value if f.confidence else None,
+            "readiness": f.readiness.value,
+            "vcpu_delta": f.deltas.get("vcpu", 0) if f.deltas else 0,
+            "priority_score": round(priority, 1),
+        })
+    return result
+
+
+def _load_findings_status(data_path: Path) -> None:
+    """Load status side-car CSV if present."""
+    from cloudopt.export.status import load_status
+    csv_path = data_path.parent / (data_path.stem + "_status.csv")
+    if csv_path.exists():
+        _DATA["findings_status"] = load_status(csv_path)
+    else:
+        _DATA["findings_status"] = {}
 
 
 def create_app(data_path: Path) -> FastAPI:
@@ -239,6 +352,73 @@ def create_app(data_path: Path) -> FastAPI:
     async def source_coverage_view():
         return _DATA["source_coverage"]
 
+    @app.get("/api/summary/waterfall")
+    async def summary_waterfall():
+        return _build_waterfall(_DATA["vms"], _DATA["findings"])
+
+    @app.get("/api/summary/archetypes")
+    async def summary_archetypes():
+        return _build_archetypes(_DATA["vms"])
+
+    @app.get("/api/summary/capacity-hygiene")
+    async def summary_capacity_hygiene():
+        return _build_capacity_hygiene(_DATA["findings"])
+
+    @app.get("/api/summary/quick-wins")
+    async def summary_quick_wins(top: int = Query(10)):
+        return _build_quick_wins(_DATA["findings"], top=top)
+
+    @app.get("/api/findings-status")
+    async def findings_status_get():
+        return _DATA.get("findings_status", {})
+
+    @app.patch("/api/findings-status/{finding_id:path}")
+    async def findings_status_patch(finding_id: str, body: dict):
+        from cloudopt.export.status import update_status
+        status_map = _DATA.get("findings_status", {})
+        status = body.get("status", "open")
+        owner = body.get("owner", "")
+        due_date = body.get("due_date", "")
+        notes = body.get("notes", "")
+        # Write to side-car CSV if path is available
+        data_path = _DATA.get("path")
+        if data_path:
+            csv_path = data_path.parent / (data_path.stem + "_status.csv")
+            update_status(csv_path, finding_id, status, owner, due_date, notes)
+            from cloudopt.export.status import load_status
+            _DATA["findings_status"] = load_status(csv_path)
+        else:
+            import datetime
+            status_map[finding_id] = {
+                "status": status, "owner": owner,
+                "due_date": due_date, "notes": notes,
+                "updated_utc": datetime.datetime.utcnow().isoformat(),
+            }
+            _DATA["findings_status"] = status_map
+        return {"ok": True, "finding_id": finding_id}
+
+    @app.get("/api/export/findings-csv")
+    async def export_findings_csv():
+        from fastapi.responses import StreamingResponse
+        from cloudopt.export.status import merge_status_into_findings
+        import csv, io
+        status_map = _DATA.get("findings_status", {})
+        rows = merge_status_into_findings(_DATA["findings"], status_map)
+        output = io.StringIO()
+        if rows:
+            fieldnames = list(rows[0].keys())
+        else:
+            fieldnames = ["finding_id", "code", "category", "vm_id", "readiness", "confidence_score", "status"]
+        writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+        output.seek(0)
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=findings.csv"},
+        )
+
     return app
 
 
@@ -284,6 +464,7 @@ def _load_excel(path: Path) -> None:
     except Exception:
         findings = []
     _DATA["findings"] = findings
+    _load_findings_status(path)
     _DATA["vmss_groups"] = read_vmss_groups_from_workbook(path)
 
 
@@ -386,6 +567,8 @@ def _load_json(path: Path) -> None:
         findings = []
     _DATA["findings"] = findings
 
+    _load_findings_status(path)
+
     # --- Source coverage (from enriched metrics if available) ------------
     _DATA["source_coverage"] = []
 
@@ -447,6 +630,7 @@ def _finding_json(f: Any) -> dict:
         "deltas": f.deltas,
         "evidence_sources": f.evidence_sources,
         "confidence": f.confidence.value if f.confidence else None,
+        "confidence_score": f.confidence_score,
         "readiness": f.readiness.value,
         "blockers_to_high": f.blockers_to_high,
         "customer_inputs_needed": f.customer_inputs_needed,
@@ -524,6 +708,34 @@ def _build_overview(
             "insufficient": sum(1 for f in cat_recs if f.readiness == Readiness.INSUFFICIENT),
         }
     by_conf: dict[str, int] = {conf.value: sum(1 for f in recs if f.confidence == conf) for conf in Confidence}
+
+    # ── New Phase 6/7 fields ──────────────────────────────────────────────
+    ready_recs = [f for f in recs if f.readiness == Readiness.READY]
+    ready_pct = round(100.0 * len(ready_recs) / max(len(recs), 1), 1)
+
+    scored = [f for f in recs if f.confidence_score is not None]
+    confidence_avg = round(
+        sum(f.confidence_score for f in scored) / max(len(scored), 1), 1
+    ) if scored else 0
+
+    vcpu_opportunity = sum(
+        abs(f.deltas.get("vcpu", 0) or 0)
+        for f in ready_recs
+        if f.deltas and (f.deltas.get("vcpu", 0) or 0) < 0
+    )
+
+    generation_gap_count = sum(1 for f in recs if f.code.startswith("SWP-GEN-"))
+
+    hist_buckets = [
+        "0-10", "10-20", "20-30", "30-40", "40-50",
+        "50-60", "60-70", "70-80", "80-90", "90-100",
+    ]
+    confidence_histogram: dict[str, int] = {b: 0 for b in hist_buckets}
+    for f in recs:
+        if f.confidence_score is not None:
+            idx = min(int(f.confidence_score) // 10, 9)
+            confidence_histogram[hist_buckets[idx]] += 1
+
     return {
         "total_vms": len(vms),
         "running_vms": sum(1 for v in vms if not _is_stopped(v)),
@@ -536,6 +748,11 @@ def _build_overview(
         "quota_alerts": sum(1 for q in quota if q.alert),
         "by_category": by_cat,
         "by_confidence": by_conf,
+        "ready_pct": ready_pct,
+        "confidence_avg": confidence_avg,
+        "vcpu_opportunity": int(vcpu_opportunity),
+        "generation_gap_count": generation_gap_count,
+        "confidence_histogram": confidence_histogram,
     }
 
 

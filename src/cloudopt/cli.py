@@ -1310,5 +1310,86 @@ def version() -> None:
     console.print(f"CLOUDOPT [cyan]{__version__}[/cyan]")
 
 
+# ---------------------------------------------------------------------------
+# update-status
+# ---------------------------------------------------------------------------
+
+@app.command("update-status")
+def update_status_cmd(
+    finding_id: Annotated[
+        str,
+        typer.Argument(help="Finding ID in format 'CODE:vm_resource_id'"),
+    ],
+    status: Annotated[
+        str,
+        typer.Argument(help="New status: open | in_progress | done | dismissed"),
+    ],
+    owner: Annotated[
+        Optional[str],
+        typer.Option("--owner", help="Owner name or email"),
+    ] = None,
+    due: Annotated[
+        Optional[str],
+        typer.Option("--due", help="Due date (YYYY-MM-DD)"),
+    ] = None,
+    notes: Annotated[
+        Optional[str],
+        typer.Option("--notes", help="Free-text notes"),
+    ] = None,
+    data: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--data",
+            help=(
+                "Path to the Excel workbook or JSON file. "
+                "If omitted, looks for *.xlsx in the current directory."
+            ),
+        ),
+    ] = None,
+) -> None:
+    """Update the status of a finding in the side-car CSV.
+
+    The side-car CSV is placed at <workbook_stem>_status.csv next to the workbook.
+
+    Example:
+
+    \b
+        cloudopt update-status "RSZ-DWN-001:/subscriptions/.../vm1" done --owner alice
+    """
+    from cloudopt.export.status import update_status
+
+    valid_statuses = ("open", "in_progress", "done", "dismissed")
+    if status not in valid_statuses:
+        console.print(f"[red]Error:[/red] status must be one of {valid_statuses}")
+        raise typer.Exit(code=1)
+
+    # Resolve data path
+    resolved_path: Path | None = data
+    if resolved_path is None:
+        xlsx_files = list(Path(".").glob("*.xlsx"))
+        if xlsx_files:
+            resolved_path = xlsx_files[0]
+        else:
+            json_files = list(Path(".").glob("*.json"))
+            if json_files:
+                resolved_path = json_files[0]
+
+    if resolved_path is None:
+        console.print("[red]Error:[/red] No workbook found. Use --data to specify the path.")
+        raise typer.Exit(code=1)
+
+    csv_path = resolved_path.parent / (resolved_path.stem + "_status.csv")
+    update_status(
+        csv_path=csv_path,
+        finding_id=finding_id,
+        status=status,
+        owner=owner or "",
+        due_date=due or "",
+        notes=notes or "",
+    )
+    console.print(f"[green]✓[/green] Status updated: [bold]{finding_id}[/bold] → [bold]{status}[/bold]")
+    console.print(f"  Side-car CSV: [cyan]{csv_path}[/cyan]")
+
+
 if __name__ == "__main__":
     app()

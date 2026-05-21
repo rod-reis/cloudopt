@@ -158,6 +158,9 @@ def write_workbook(
     findings_list: list[Finding] = findings or []
     enriched_list: list[EnrichedVmMetrics] = enriched_metrics or []
 
+    # Sheet 0 — Executive Summary (inserted first)
+    _write_exec_summary_sheet(wb, findings_list, vms)
+
     # Resolve legacy param aliases
     _quota_items = quota_items or quota or []
     _appinsights = app_insights or appinsights or []
@@ -595,6 +598,199 @@ def _sheet_technical_summary(
     pie.add_data(pie_data_ref)
     pie.set_categories(pie_labs_ref)
     ws.add_chart(pie, "H27")
+
+
+# ---------------------------------------------------------------------------
+# Sheet 0: Executive Summary  (Phase 6)
+# ---------------------------------------------------------------------------
+
+def _write_exec_summary_sheet(wb: Workbook, findings: list, vms: list) -> None:
+    """Write 'Executive Summary' as the first sheet in the workbook."""
+    ws = wb.create_sheet("Executive Summary", 0)
+    ws.sheet_view.showGridLines = False
+
+    recs = [f for f in findings if f.finding_type == FindingType.RECOMMENDATION]
+    ready_recs = [f for f in recs if f.readiness == Readiness.READY]
+    ready_pct = round(100.0 * len(ready_recs) / max(len(recs), 1), 1)
+    scored_recs = [f for f in recs if f.confidence_score is not None]
+    avg_score = round(sum(f.confidence_score for f in scored_recs) / max(len(scored_recs), 1), 1) if scored_recs else 0
+    vcpu_opp = sum(
+        abs(f.deltas.get("vcpu", 0) or 0)
+        for f in ready_recs
+        if f.deltas and (f.deltas.get("vcpu", 0) or 0) < 0
+    )
+    gen_gap_count = sum(1 for f in recs if f.code.startswith("SWP-GEN-"))
+
+    _thin = Border(
+        left=Side(style="thin", color="BDD7EE"),
+        right=Side(style="thin", color="BDD7EE"),
+        bottom=Side(style="thin", color="BDD7EE"),
+    )
+
+    # ── Row 1: Title banner ───────────────────────────────────────────────
+    ws.merge_cells("A1:G1")
+    title = ws.cell(row=1, column=1, value="CLOUDOPT  ·  Executive Summary")
+    title.font = Font(bold=True, size=16, color="FFFFFF")
+    title.fill = _HDR_FILL
+    title.alignment = Alignment(vertical="center", horizontal="left", indent=2)
+    ws.row_dimensions[1].height = 30
+
+    # ── Section 1: KPI row ────────────────────────────────────────────────
+    ws.row_dimensions[2].height = 8  # spacer
+    ws.merge_cells("A3:G3")
+    sec1 = ws.cell(row=3, column=1, value="  KEY PERFORMANCE INDICATORS")
+    sec1.fill = _SECTION_FILL
+    sec1.font = Font(color="FFFFFF", bold=True, size=10)
+    sec1.alignment = Alignment(vertical="center", horizontal="left", indent=1)
+    ws.row_dimensions[3].height = 20
+
+    kpi_labels = ["Total VMs", "READY Actions", "READY %", "Avg Confidence Score", "vCPU Opportunity", "Generation Gap Count"]
+    kpi_values = [len(vms), len(ready_recs), f"{ready_pct}%", f"{avg_score}/100", int(vcpu_opp), gen_gap_count]
+    kpi_fills = [
+        PatternFill("solid", fgColor="BDD7EE"),  # blue - Total VMs
+        _GREEN_FILL,                              # green - READY
+        _GREEN_FILL,                              # green - READY%
+        PatternFill("solid", fgColor="BDD7EE"),  # blue - Score
+        PatternFill("solid", fgColor="E8D5F5"),  # purple - vCPU
+        _YELLOW_FILL,                             # amber - Gen gap
+    ]
+    for col, (label, value, fill) in enumerate(zip(kpi_labels, kpi_values, kpi_fills), start=1):
+        lbl = ws.cell(row=4, column=col, value=label)
+        lbl.fill = _COL_HDR_FILL
+        lbl.font = Font(color="FFFFFF", bold=True, size=9)
+        lbl.alignment = Alignment(horizontal="center", vertical="center")
+        lbl.border = _thin
+        ws.row_dimensions[4].height = 18
+
+        val = ws.cell(row=5, column=col, value=value)
+        val.font = Font(bold=True, size=14, color="1F4E79")
+        val.fill = fill
+        val.alignment = Alignment(horizontal="center", vertical="center")
+        val.border = _thin
+        ws.row_dimensions[5].height = 28
+
+    ws.row_dimensions[6].height = 10  # spacer
+
+    # ── Section 2: Top 10 Quick Wins ─────────────────────────────────────
+    ws.merge_cells("A7:G7")
+    sec2 = ws.cell(row=7, column=1, value="  TOP 10 QUICK WINS  (sorted by Confidence Score × |vCPU Delta|)")
+    sec2.fill = _SECTION_FILL
+    sec2.font = Font(color="FFFFFF", bold=True, size=10)
+    sec2.alignment = Alignment(vertical="center", horizontal="left", indent=1)
+    ws.row_dimensions[7].height = 20
+
+    qw_headers = ["Rank", "Code", "Resource", "Current", "Proposed", "Confidence Score", "Rationale"]
+    for col, hdr in enumerate(qw_headers, start=1):
+        c = ws.cell(row=8, column=col, value=hdr)
+        c.fill = _COL_HDR_FILL
+        c.font = Font(color="FFFFFF", bold=True, size=9)
+        c.alignment = Alignment(horizontal="center" if col > 1 else "left", vertical="center", indent=1 if col == 1 else 0)
+        c.border = _thin
+    ws.row_dimensions[8].height = 18
+
+    def _priority(f):
+        score = f.confidence_score or 0
+        delta = abs(f.deltas.get("vcpu", 0) or 0) if f.deltas else 0
+        return score * max(delta, 1)
+
+    top_wins = sorted(ready_recs, key=_priority, reverse=True)[:10]
+    for i, f in enumerate(top_wins):
+        row = 9 + i
+        alt = i % 2 == 0
+        bg = _ALT_FILL if alt else PatternFill()
+        vm_display = f.vm_id.split("/")[-1] if "/" in f.vm_id else f.vm_id
+        vm_display = mask_subscription_ids_in_string(vm_display)
+        rationale_truncated = (f.rationale or "")[:200]
+        row_vals = [i + 1, f.code, vm_display, f.current or "", f.proposed or "", f.confidence_score or "", rationale_truncated]
+        for col, val in enumerate(row_vals, start=1):
+            cell = ws.cell(row=row, column=col, value=val)
+            cell.font = Font(size=9)
+            cell.fill = bg
+            cell.border = _thin
+            cell.alignment = Alignment(vertical="top")
+        # Color score cell
+        score_cell = ws.cell(row=row, column=6)
+        if f.confidence_score is not None:
+            if f.confidence_score >= 80:
+                score_cell.fill = _GREEN_FILL
+                score_cell.font = Font(size=9, bold=True, color="375623")
+            elif f.confidence_score >= 50:
+                score_cell.fill = _YELLOW_FILL
+                score_cell.font = Font(size=9, bold=True, color="833C00")
+            else:
+                score_cell.fill = _RED_FILL
+                score_cell.font = Font(size=9, bold=True, color="9C0006")
+        ws.row_dimensions[row].height = 16
+
+    qw_end = 9 + len(top_wins) - 1 if top_wins else 9
+    ws.row_dimensions[qw_end + 1].height = 10  # spacer
+
+    # ── Section 3: Capacity Ops Hygiene Scorecard ─────────────────────────
+    hygiene_row = qw_end + 2
+    ws.merge_cells(f"A{hygiene_row}:G{hygiene_row}")
+    sec3 = ws.cell(row=hygiene_row, column=1, value="  CAPACITY OPS HYGIENE SCORECARD  (QTA-OPS-001)")
+    sec3.fill = _SECTION_FILL
+    sec3.font = Font(color="FFFFFF", bold=True, size=10)
+    sec3.alignment = Alignment(vertical="center", horizontal="left", indent=1)
+    ws.row_dimensions[hygiene_row].height = 20
+
+    hygiene_hdr_row = hygiene_row + 1
+    hygiene_headers = ["Subscription", "Sub-check A", "Sub-check B", "Sub-check C", "Sub-check D", "Sub-check E"]
+    for col, hdr in enumerate(hygiene_headers, start=1):
+        c = ws.cell(row=hygiene_hdr_row, column=col, value=hdr)
+        c.fill = _COL_HDR_FILL
+        c.font = Font(color="FFFFFF", bold=True, size=9)
+        c.alignment = Alignment(horizontal="center" if col > 1 else "left", vertical="center", indent=1 if col == 1 else 0)
+        c.border = _thin
+    ws.row_dimensions[hygiene_hdr_row].height = 18
+
+    hygiene_findings = [f for f in findings if f.code == "QTA-OPS-001"]
+    if hygiene_findings:
+        for i, f in enumerate(hygiene_findings):
+            row = hygiene_hdr_row + 1 + i
+            sub_id = f.vm_id.replace("/subscriptions/", "").split("/")[0]
+            sub_display = mask_subscription_id(sub_id) if len(sub_id) > 8 else sub_id
+            subchecks = f.deltas.get("subchecks", []) if f.deltas else []
+            check_map = {}
+            for check in subchecks:
+                label = check.get("label", "")
+                passed = check.get("pass", False)
+                for key in ["A", "B", "C", "D", "E"]:
+                    if label.startswith(f"{key}:"):
+                        check_map[key.lower()] = passed
+            alt = i % 2 == 0
+            bg = _ALT_FILL if alt else PatternFill()
+            sub_cell = ws.cell(row=row, column=1, value=sub_display)
+            sub_cell.font = Font(size=9)
+            sub_cell.fill = bg
+            sub_cell.border = _thin
+            for col_offset, key in enumerate(["a", "b", "c", "d", "e"], start=2):
+                if key in check_map:
+                    val = "✓" if check_map[key] else "✗"
+                    fill = _GREEN_FILL if check_map[key] else _RED_FILL
+                    font_color = "375623" if check_map[key] else "9C0006"
+                else:
+                    val = "—"
+                    fill = bg
+                    font_color = "595959"
+                c = ws.cell(row=row, column=col_offset, value=val)
+                c.fill = fill
+                c.font = Font(size=9, bold=True, color=font_color)
+                c.alignment = Alignment(horizontal="center", vertical="center")
+                c.border = _thin
+            ws.row_dimensions[row].height = 16
+    else:
+        no_data = ws.cell(row=hygiene_hdr_row + 1, column=1, value="No QTA-OPS-001 findings found")
+        no_data.font = Font(size=9, italic=True, color="595959")
+
+    # ── Column widths ─────────────────────────────────────────────────────
+    ws.column_dimensions["A"].width = 20
+    ws.column_dimensions["B"].width = 18
+    ws.column_dimensions["C"].width = 30
+    ws.column_dimensions["D"].width = 18
+    ws.column_dimensions["E"].width = 18
+    ws.column_dimensions["F"].width = 18
+    ws.column_dimensions["G"].width = 55
 
 
 # ---------------------------------------------------------------------------

@@ -579,6 +579,25 @@
         border-color: #7a2020;
         color: #fc8181;
       }
+      /* Score badges */
+      .score-badge { display:inline-block; padding:2px 7px; border-radius:4px; font-size:11px; font-weight:700; }
+      .score-high { background:var(--green-lt); color:var(--green); }
+      .score-med  { background:var(--amber-lt); color:var(--amber); }
+      .score-low  { background:var(--red-lt);   color:var(--red); }
+      /* Hygiene pills */
+      .pill-pass { display:inline-block; padding:2px 8px; border-radius:12px; background:var(--green-lt); color:var(--green); font-size:11px; font-weight:700; }
+      .pill-fail { display:inline-block; padding:2px 8px; border-radius:12px; background:var(--red-lt); color:var(--red); font-size:11px; font-weight:700; }
+      .pill-na   { display:inline-block; padding:2px 8px; border-radius:12px; background:#f0f0f0; color:#888; font-size:11px; }
+      /* Status badges */
+      .status-open        { display:inline-block; padding:2px 8px; border-radius:4px; background:#e2e8f0; color:#4a5568; font-size:11px; }
+      .status-in_progress { display:inline-block; padding:2px 8px; border-radius:4px; background:var(--azure-lt); color:#2e75b6; font-size:11px; font-weight:700; }
+      .status-done        { display:inline-block; padding:2px 8px; border-radius:4px; background:var(--green-lt); color:var(--green); font-size:11px; font-weight:700; }
+      .status-dismissed   { display:inline-block; padding:2px 8px; border-radius:4px; background:#f5f5f5; color:#999; font-size:11px; text-decoration:line-through; }
+      /* Archetype badges */
+      .arch-badge { display:inline-block; padding:2px 7px; border-radius:4px; font-size:11px; font-weight:600; background:var(--azure-lt); color:var(--navy); }
+      /* Status filter chips */
+      .chip { display:inline-block; padding:4px 12px; border-radius:16px; border:1px solid var(--border); cursor:pointer; font-size:12px; margin-right:6px; background:var(--card); }
+      .chip.active { background:var(--azure); color:#fff; border-color:var(--azure); }
     </style>
   </head>
   <body>
@@ -641,6 +660,15 @@
         </div>
       </div>
       <div class="nav-group">
+        <div class="nav-label">Capacity Intelligence</div>
+        <div class="nav-item" data-section="s-archetypes" onclick="nav(this)">
+          <span class="nav-icon">&#x1F9EC;</span>Workload Archetypes
+        </div>
+        <div class="nav-item" data-section="s-action-plan" onclick="nav(this)">
+          <span class="nav-icon">&#x1F4CB;</span>Action Plan
+        </div>
+      </div>
+      <div class="nav-group">
         <div class="nav-label">Info</div>
         <div class="nav-item" data-section="s-collection" onclick="nav(this)">
           <span class="nav-icon">&#x2139;&#xFE0F;</span>Collection Info
@@ -670,6 +698,7 @@
       <div id="content">
         <!-- DASHBOARD -->
         <div id="s-dashboard" class="section active">
+          <!-- Row 1: KPI cards -->
           <div class="kpi-grid">
             <div class="kpi-card">
               <div class="kpi-label">Total VMs</div>
@@ -688,58 +717,46 @@
               <div class="kpi-value" id="kpi-findings">&#x2014;</div>
             </div>
             <div class="kpi-card green">
-              <div class="kpi-label">READY Actions</div>
-              <div class="kpi-value" id="kpi-ready">&#x2014;</div>
-              <div class="kpi-sub">High-confidence, act now</div>
+              <div class="kpi-label">Ready %</div>
+              <div class="kpi-value" id="kpi-ready-pct">&#x2014;</div>
+              <div class="kpi-sub">Actions you can take now</div>
             </div>
             <div class="kpi-card amber">
-              <div class="kpi-label">LIKELY Actions</div>
-              <div class="kpi-value" id="kpi-likely">&#x2014;</div>
-              <div class="kpi-sub">Probably safe to act</div>
+              <div class="kpi-label">Avg Confidence</div>
+              <div class="kpi-value" id="kpi-conf-avg">&#x2014;</div>
+              <div class="kpi-sub">Score 0–100</div>
             </div>
             <div class="kpi-card purple">
-              <div class="kpi-label">DISCOVERY</div>
-              <div class="kpi-value" id="kpi-discovery">&#x2014;</div>
-              <div class="kpi-sub">Needs investigation</div>
+              <div class="kpi-label">vCPU Opportunity</div>
+              <div class="kpi-value" id="kpi-vcpu-opp">&#x2014;</div>
+              <div class="kpi-sub">Reclaimable cores</div>
             </div>
             <div class="kpi-card red">
-              <div class="kpi-label">Quota Alerts</div>
-              <div class="kpi-value" id="kpi-quota">&#x2014;</div>
+              <div class="kpi-label">Generation Gap</div>
+              <div class="kpi-value" id="kpi-gen-gap">&#x2014;</div>
+              <div class="kpi-sub">Old-gen VMs</div>
             </div>
           </div>
+          <!-- Row 2: Charts -->
           <div class="chart-row wide">
             <div class="chart-card">
-              <h3>Findings by Category &amp; Readiness</h3>
-              <canvas id="chart-category"></canvas>
+              <h3>Savings Waterfall</h3>
+              <canvas id="chart-waterfall"></canvas>
             </div>
             <div class="chart-card">
-              <h3>Confidence Distribution</h3>
-              <canvas id="chart-confidence"></canvas>
+              <h3>Confidence Score Distribution</h3>
+              <canvas id="chart-confidence-hist"></canvas>
             </div>
           </div>
-          <div class="table-card">
-            <div class="table-header">
-              <h3>Top READY Decisions</h3>
-              <span
-                id="top-ready-count"
-                style="font-size: 12px; color: var(--muted)"
-              ></span>
+          <!-- Row 3: Capacity Hygiene + Quick Wins -->
+          <div class="chart-row wide">
+            <div class="chart-card">
+              <h3>Capacity Hygiene</h3>
+              <div id="hygiene-grid"></div>
             </div>
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Code</th>
-                    <th>Category</th>
-                    <th>Resource</th>
-                    <th>Current</th>
-                    <th>Proposed</th>
-                    <th>Rationale</th>
-                    <th>Confidence</th>
-                  </tr>
-                </thead>
-                <tbody id="top-ready-body"></tbody>
-              </table>
+            <div class="chart-card">
+              <h3>Quick Wins</h3>
+              <div id="quick-wins-list"></div>
             </div>
           </div>
         </div>
@@ -803,6 +820,7 @@
                     <th>Category</th>
                     <th>Readiness</th>
                     <th>Confidence</th>
+                    <th>Score</th>
                     <th>Resource</th>
                     <th>Current</th>
                     <th>Proposed</th>
@@ -1281,6 +1299,65 @@
             </div>
           </div>
         </div>
+
+        <!-- WORKLOAD ARCHETYPES -->
+        <div id="s-archetypes" class="section">
+          <div id="archetypes-cards"></div>
+          <div class="table-card" style="margin-top:16px">
+            <div class="table-header">
+              <h3>Archetype Details</h3>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Archetype</th>
+                    <th>VM Count</th>
+                    <th>Avg vCPU %</th>
+                    <th>Avg Mem %</th>
+                    <th>Avg Score</th>
+                    <th>Primary Recommendation</th>
+                  </tr>
+                </thead>
+                <tbody id="archetypes-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- ACTION PLAN -->
+        <div id="s-action-plan" class="section">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
+            <span id="chip-all"     class="chip active"        onclick="filterActionPlan('all')">All</span>
+            <span id="chip-open"    class="chip"               onclick="filterActionPlan('open')">Open</span>
+            <span id="chip-in_progress" class="chip"           onclick="filterActionPlan('in_progress')">In Progress</span>
+            <span id="chip-done"    class="chip"               onclick="filterActionPlan('done')">Done</span>
+            <span id="chip-dismissed" class="chip"             onclick="filterActionPlan('dismissed')">Dismissed</span>
+            <button class="btn btn-sm" style="margin-left:auto;" onclick="exportActionPlanCsv()">&#x2B07; Export CSV</button>
+          </div>
+          <div class="table-card">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Code</th>
+                    <th>Resource</th>
+                    <th>Category</th>
+                    <th>Readiness</th>
+                    <th>Score</th>
+                    <th>Status</th>
+                    <th>Owner</th>
+                    <th>Due</th>
+                    <th>Notes</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="action-plan-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
       </div>
     </div>
 
@@ -1296,6 +1373,8 @@
         crg = [],
         depFail = [];
       var overview = {};
+      var waterfallData = [], archetypesData = [], hygieneData = {}, quickWinsData = [];
+      var findingsStatus = {};
       var meta = {};
       var perVmData = [],
         vmInsightsData = [];
@@ -1416,6 +1495,8 @@
         "s-crg": "Capacity Reservations",
         "s-depfail": "Deployment Failures",
         "s-collection": "Collection Info",
+        "s-archetypes": "Workload Archetypes",
+        "s-action-plan": "Action Plan",
       };
 
       function nav(el) {
@@ -1525,6 +1606,21 @@
             .catch(function () {
               return [];
             }),
+          fetch("/api/summary/waterfall")
+            .then(function (r) { return r.json(); })
+            .catch(function () { return []; }),
+          fetch("/api/summary/archetypes")
+            .then(function (r) { return r.json(); })
+            .catch(function () { return []; }),
+          fetch("/api/summary/capacity-hygiene")
+            .then(function (r) { return r.json(); })
+            .catch(function () { return {}; }),
+          fetch("/api/summary/quick-wins")
+            .then(function (r) { return r.json(); })
+            .catch(function () { return []; }),
+          fetch("/api/findings-status")
+            .then(function (r) { return r.json(); })
+            .catch(function () { return {}; }),
         ]);
         overview = results[0];
         subData = results[1];
@@ -1539,6 +1635,11 @@
         meta = results[10];
         perVmData = results[11] || [];
         vmInsightsData = results[12] || [];
+        waterfallData = results[13] || [];
+        archetypesData = results[14] || [];
+        hygieneData = results[15] || {};
+        quickWinsData = results[16] || [];
+        findingsStatus = results[17] || {};
         renderAll();
       }
 
@@ -1566,6 +1667,8 @@
         renderPerfVm();
         populateInsFilters();
         renderVmInsights();
+        renderArchetypes();
+        renderActionPlan("all");
         initAllSortable();
       }
 
@@ -1584,147 +1687,21 @@
       function renderDashboard() {
         function set(id, v) {
           var el = document.getElementById(id);
-          if (el) el.textContent = fmtNum(v != null ? v : "\u2014");
+          if (el) el.textContent = v != null ? v : "\u2014";
         }
-        set("kpi-total", overview.total_vms);
-        set("kpi-running", overview.running_vms);
-        set("kpi-stopped", overview.stopped_vms);
+        set("kpi-total",    overview.total_vms);
+        set("kpi-running",  overview.running_vms);
+        set("kpi-stopped",  overview.stopped_vms);
         set("kpi-findings", overview.total_findings);
-        set("kpi-ready", overview.ready_count);
-        set("kpi-likely", overview.likely_count);
-        set("kpi-discovery", overview.discovery_count);
-        set("kpi-quota", overview.quota_alerts);
+        set("kpi-ready-pct", overview.ready_pct != null ? overview.ready_pct.toFixed(1) + "%" : "\u2014");
+        set("kpi-conf-avg",  overview.confidence_avg != null ? overview.confidence_avg.toFixed(0) : "\u2014");
+        set("kpi-vcpu-opp",  overview.vcpu_opportunity);
+        set("kpi-gen-gap",   overview.generation_gap_count);
 
-        var cats = ["rightsize", "swap", "decom", "cleanup", "quota", "crr"];
-        var catLabels = [
-          "Rightsize",
-          "Swap",
-          "Decommission",
-          "Cleanup",
-          "Quota",
-          "CRR",
-        ];
-        var byCat = overview.by_category || {};
-        var catCtx = document.getElementById("chart-category").getContext("2d");
-        if (chartCategory) chartCategory.destroy();
-        chartCategory = new Chart(catCtx, {
-          type: "bar",
-          data: {
-            labels: catLabels,
-            datasets: [
-              {
-                label: "READY",
-                data: cats.map(function (c) {
-                  return (byCat[c] && byCat[c].ready) || 0;
-                }),
-                backgroundColor: "#38a169",
-              },
-              {
-                label: "LIKELY",
-                data: cats.map(function (c) {
-                  return (byCat[c] && byCat[c].likely) || 0;
-                }),
-                backgroundColor: "#3182ce",
-              },
-              {
-                label: "DISCOVERY",
-                data: cats.map(function (c) {
-                  return (byCat[c] && byCat[c].discovery) || 0;
-                }),
-                backgroundColor: "#ed8936",
-              },
-              {
-                label: "INSUFF.",
-                data: cats.map(function (c) {
-                  return (byCat[c] && byCat[c].insufficient) || 0;
-                }),
-                backgroundColor: "#e53e3e",
-              },
-            ],
-          },
-          options: {
-            responsive: true,
-            scales: {
-              x: { stacked: true },
-              y: { stacked: true, beginAtZero: true },
-            },
-            plugins: {
-              legend: {
-                position: "bottom",
-                labels: { boxWidth: 12, font: { size: 11 } },
-              },
-            },
-          },
-        });
-
-        var byConf = overview.by_confidence || {};
-        var confCtx = document
-          .getElementById("chart-confidence")
-          .getContext("2d");
-        if (chartConfidence) chartConfidence.destroy();
-        chartConfidence = new Chart(confCtx, {
-          type: "doughnut",
-          data: {
-            labels: ["HIGH", "MEDIUM", "LOW"],
-            datasets: [
-              {
-                data: [byConf.HIGH || 0, byConf.MEDIUM || 0, byConf.LOW || 0],
-                backgroundColor: ["#38a169", "#d97706", "#e53e3e"],
-                borderWidth: 2,
-              },
-            ],
-          },
-          options: {
-            responsive: true,
-            plugins: {
-              legend: {
-                position: "bottom",
-                labels: { boxWidth: 12, font: { size: 11 } },
-              },
-            },
-          },
-        });
-
-        var ready = findings
-          .filter(function (f) {
-            return (
-              f.readiness === "READY" && f.finding_type === "recommendation"
-            );
-          })
-          .slice(0, 15);
-        var el = document.getElementById("top-ready-count");
-        if (el) el.textContent = ready.length + " shown";
-        var rows = ready
-          .map(function (f) {
-            var vmShort = f.vm_id.split("/").pop();
-            return (
-              '<tr><td><code style="font-size:12px">' +
-              esc(f.code) +
-              "</code></td>" +
-              "<td>" +
-              badgeCat(f.category) +
-              "</td>" +
-              '<td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' +
-              esc(f.vm_id) +
-              '">' +
-              esc(vmShort) +
-              "</td>" +
-              "<td>" +
-              esc(f.current || "\u2014") +
-              "</td>" +
-              "<td>" +
-              esc(f.proposed || "\u2014") +
-              "</td>" +
-              '<td style="max-width:240px;white-space:normal;font-size:12px;color:var(--muted)">' +
-              esc(f.rationale) +
-              "</td>" +
-              "<td>" +
-              badgeConfidence(f.confidence) +
-              "</td></tr>"
-            );
-          })
-          .join("");
-        tbody("top-ready-body", rows);
+        renderWaterfall();
+        renderConfidenceHist();
+        renderHygiene();
+        renderQuickWins();
       }
 
       // ── Decisions ──────────────────────────────────────
@@ -1780,6 +1757,7 @@
               "<td>" +
               badgeConfidence(f.confidence) +
               "</td>" +
+              "<td>" + scoreBadge(f.confidence_score) + "</td>" +
               '<td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' +
               esc(f.vm_id) +
               '">' +
@@ -1798,6 +1776,198 @@
           })
           .join("");
         tbody("findings-body", rows);
+      }
+
+      // ── New helper functions (Phase 6/7) ────────────────
+
+      function scoreBadge(score) {
+        if (score == null) return "\u2014";
+        var cls = score >= 75 ? "score-high" : score >= 40 ? "score-med" : "score-low";
+        return '<span class="score-badge ' + cls + '">' + score + "</span>";
+      }
+
+      var chartWaterfall, chartConfidenceHist;
+
+      function renderWaterfall() {
+        var ctx = document.getElementById("chart-waterfall");
+        if (!ctx) return;
+        if (chartWaterfall) chartWaterfall.destroy();
+        var labels = waterfallData.map(function (d) { return d.label; });
+        var vals   = waterfallData.map(function (d) { return d.value; });
+        var colors = vals.map(function (v) { return v >= 0 ? "#38a169" : "#e53e3e"; });
+        chartWaterfall = new Chart(ctx.getContext("2d"), {
+          type: "bar",
+          data: {
+            labels: labels,
+            datasets: [{ data: vals, backgroundColor: colors, borderWidth: 0 }]
+          },
+          options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: { y: { beginAtZero: true } }
+          }
+        });
+      }
+
+      function renderConfidenceHist() {
+        var ctx = document.getElementById("chart-confidence-hist");
+        if (!ctx) return;
+        if (chartConfidenceHist) chartConfidenceHist.destroy();
+        var hist = overview.confidence_histogram || {};
+        var labels = ["0-24", "25-49", "50-74", "75-100"];
+        var data   = [hist["0-24"] || 0, hist["25-49"] || 0, hist["50-74"] || 0, hist["75-100"] || 0];
+        chartConfidenceHist = new Chart(ctx.getContext("2d"), {
+          type: "bar",
+          data: {
+            labels: labels,
+            datasets: [{ label: "Findings", data: data, backgroundColor: "#3182ce", borderWidth: 0 }]
+          },
+          options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+          }
+        });
+      }
+
+      function renderHygiene() {
+        var el = document.getElementById("hygiene-grid");
+        if (!el) return;
+        var checks = [
+          { key: "has_stopped_vms",     label: "No Stopped VMs",      invert: true },
+          { key: "has_old_gen_vms",      label: "No Old-Gen VMs",      invert: true },
+          { key: "has_unattached_disks", label: "No Unattached Disks", invert: true },
+          { key: "has_oversized_vms",    label: "No Oversized VMs",    invert: true },
+          { key: "all_monitored",        label: "All VMs Monitored",   invert: false },
+          { key: "crr_configured",       label: "CRR Configured",      invert: false },
+        ];
+        var html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;">';
+        checks.forEach(function (c) {
+          var raw = hygieneData[c.key];
+          var pass = c.invert ? !raw : !!raw;
+          var pill = raw == null
+            ? '<span class="pill-na">N/A</span>'
+            : (pass ? '<span class="pill-pass">PASS</span>' : '<span class="pill-fail">FAIL</span>');
+          html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border:1px solid var(--border);border-radius:6px;">'
+               + '<span style="font-size:12px;">' + esc(c.label) + "</span>"
+               + pill + "</div>";
+        });
+        html += "</div>";
+        el.innerHTML = html;
+      }
+
+      function renderQuickWins() {
+        var el = document.getElementById("quick-wins-list");
+        if (!el) return;
+        if (!quickWinsData.length) { el.innerHTML = '<p style="color:var(--muted);font-size:13px;">No quick wins found.</p>'; return; }
+        var html = '<ol style="margin:0;padding-left:18px;">';
+        quickWinsData.forEach(function (w) {
+          html += "<li style='margin-bottom:6px;font-size:13px;'>"
+               + "<strong>" + esc(w.code) + "</strong> \u2014 "
+               + esc(w.vm_short || w.vm_id || "")
+               + ' <span style="color:var(--muted);font-size:11px;">' + esc(w.rationale || "") + "</span>"
+               + "</li>";
+        });
+        html += "</ol>";
+        el.innerHTML = html;
+      }
+
+      function renderArchetypes() {
+        var cardsEl = document.getElementById("archetypes-cards");
+        if (cardsEl) {
+          if (!archetypesData.length) {
+            cardsEl.innerHTML = '<p style="color:var(--muted);font-size:13px;">No archetype data available.</p>';
+          } else {
+            var html = '<div class="kpi-grid">';
+            archetypesData.forEach(function (a) {
+              html += '<div class="kpi-card">'
+                   + '<div class="kpi-label"><span class="arch-badge">' + esc(a.archetype) + "</span></div>"
+                   + '<div class="kpi-value">' + fmtNum(a.vm_count) + " VMs</div>"
+                   + '<div class="kpi-sub">' + esc(a.primary_recommendation || "") + "</div>"
+                   + "</div>";
+            });
+            html += "</div>";
+            cardsEl.innerHTML = html;
+          }
+        }
+        renderArchetypesTable();
+      }
+
+      function renderArchetypesTable() {
+        var rows = archetypesData.map(function (a) {
+          return "<tr>"
+            + "<td><span class='arch-badge'>" + esc(a.archetype) + "</span></td>"
+            + "<td>" + fmtNum(a.vm_count) + "</td>"
+            + "<td>" + (a.avg_cpu_pct != null ? a.avg_cpu_pct.toFixed(1) + "%" : "\u2014") + "</td>"
+            + "<td>" + (a.avg_mem_pct != null ? a.avg_mem_pct.toFixed(1) + "%" : "\u2014") + "</td>"
+            + "<td>" + scoreBadge(a.avg_score != null ? Math.round(a.avg_score) : null) + "</td>"
+            + "<td>" + esc(a.primary_recommendation || "\u2014") + "</td>"
+            + "</tr>";
+        }).join("");
+        tbody("archetypes-body", rows);
+      }
+
+      var _apFilter = "all";
+      function filterActionPlan(status) {
+        _apFilter = status;
+        document.querySelectorAll(".chip").forEach(function (c) { c.classList.remove("active"); });
+        var chip = document.getElementById("chip-" + status);
+        if (chip) chip.classList.add("active");
+        renderActionPlan(status);
+      }
+
+      function renderActionPlan(status) {
+        var items = findings.filter(function (f) { return f.finding_type === "recommendation"; });
+        if (status && status !== "all") {
+          items = items.filter(function (f) {
+            var key = f.code + ":" + f.vm_id;
+            var st = (findingsStatus[key] && findingsStatus[key].status) || "open";
+            return st === status;
+          });
+        }
+        var rows = items.map(function (f) {
+          var key = f.code + ":" + f.vm_id;
+          var st    = (findingsStatus[key] && findingsStatus[key].status) || "open";
+          var owner = (findingsStatus[key] && findingsStatus[key].owner) || "";
+          var due   = (findingsStatus[key] && findingsStatus[key].due_date) || "";
+          var notes = (findingsStatus[key] && findingsStatus[key].notes) || "";
+          var vmShort = f.vm_id.split("/").pop();
+          return "<tr>"
+            + '<td><code style="font-size:12px">' + esc(f.code) + "</code></td>"
+            + '<td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(f.vm_id) + '">' + esc(vmShort) + "</td>"
+            + "<td>" + badgeCat(f.category) + "</td>"
+            + "<td>" + badgeReadiness(f.readiness) + "</td>"
+            + "<td>" + scoreBadge(f.confidence_score) + "</td>"
+            + '<td><span class="status-' + esc(st) + '">' + esc(st) + "</span></td>"
+            + "<td>" + esc(owner) + "</td>"
+            + "<td>" + esc(due) + "</td>"
+            + '<td style="font-size:11px;color:var(--muted)">' + esc(notes) + "</td>"
+            + "<td><button class=\"btn btn-sm\" onclick=\"setFindingStatus('" + esc(key).replace(/'/g, "\\'") + "')\">Edit</button></td>"
+            + "</tr>";
+        }).join("");
+        tbody("action-plan-body", rows);
+      }
+
+      function setFindingStatus(key) {
+        var cur = findingsStatus[key] || {};
+        var newStatus = prompt("Status for:\n" + key + "\n\nEnter: open | in_progress | done | dismissed", cur.status || "open");
+        if (!newStatus) return;
+        var owner = prompt("Owner (optional):", cur.owner || "");
+        var due   = prompt("Due date YYYY-MM-DD (optional):", cur.due_date || "");
+        var notes = prompt("Notes (optional):", cur.notes || "");
+        fetch("/api/findings-status", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ finding_id: key, status: newStatus, owner: owner || "", due_date: due || "", notes: notes || "" })
+        }).then(function (r) { return r.json(); }).then(function (updated) {
+          findingsStatus = updated;
+          renderActionPlan(_apFilter);
+          renderFindings();
+        });
+      }
+
+      function exportActionPlanCsv() {
+        window.location.href = "/api/export/findings-csv";
       }
 
       // ── Subscriptions ──────────────────────────────────
