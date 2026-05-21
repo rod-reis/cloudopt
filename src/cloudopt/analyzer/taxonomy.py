@@ -63,6 +63,7 @@ class SubCategory(str, Enum):
     QUOTA_WARNING = "warning"
     QUOTA_CRITICAL_INDIVIDUAL = "critical-individual"
     QUOTA_CRITICAL_GROUPABLE = "critical-groupable"
+    QUOTA_OPS_HYGIENE = "quota-ops-hygiene"
 
     # --- crr (capacity reservation groups, SPEC §2.6) ---
     CRR_UNUSED = "crr-unused"
@@ -336,6 +337,18 @@ REGISTRY: tuple[RegistryEntry, ...] = (
         description=(
             "> 85% utilization — eligible for quota-group consolidation"
             " across subscriptions."
+        ),
+    ),
+    RegistryEntry(
+        code="QTA-OPS-001",
+        category=Category.QUOTA,
+        subcategory=SubCategory.QUOTA_OPS_HYGIENE,
+        finding_type=FindingType.RECOMMENDATION,
+        description=(
+            "One or more proactive capacity monitoring signals are missing: "
+            "quota usage alert, allocation-failure activity-log alert, "
+            "QuotaExceeded alert, CRR under-utilization alert, "
+            "or Service Health alert subscription."
         ),
     ),
     RegistryEntry(

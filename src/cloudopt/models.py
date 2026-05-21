@@ -529,6 +529,36 @@ class AppInsightsMetrics(BaseModel):
     time_series: list[DailyDataPoint] = Field(default_factory=list)
 
 
+
+# ---------------------------------------------------------------------------
+# Capacity alerts (Phase 5 — QTA-OPS-001)
+# ---------------------------------------------------------------------------
+
+class CapacityAlertType(str, Enum):
+    """ARM resource type category for a capacity monitoring alert rule."""
+    METRIC_ALERT = "metric-alert"
+    ACTIVITY_LOG_ALERT = "activity-log-alert"
+    SERVICE_HEALTH_ALERT = "service-health-alert"
+    SCHEDULED_QUERY_RULE = "scheduled-query-rule"
+
+
+class CapacityAlert(BaseModel):
+    """A single Azure Monitor alert rule relevant to capacity operations.
+
+    Collected by ``collector/alerts.py`` and consumed by the
+    ``QTA-OPS-001`` detector (``detectors/ops_hygiene.py``).
+    """
+    resource_id: str
+    subscription_id: str
+    alert_type: CapacityAlertType
+    name: str
+    enabled: bool
+    # Signal names or condition descriptions (e.g. "AllocationFailed", "quota.percentUsage")
+    signals: list[str] = Field(default_factory=list)
+    # ARM resource types / scopes this alert applies to
+    scopes: list[str] = Field(default_factory=list)
+
+
 # ---------------------------------------------------------------------------
 # Advisor (SKU-change recommendations)
 # ---------------------------------------------------------------------------

@@ -47,11 +47,12 @@ _EXPECTED_CODES: set[str] = {
     "CLN-NIC-001",
     "CLN-SNP-001",
     "CLN-RGP-001",
-    # quota (4)
+    # quota (5)
     "QTA-OVR-001",
     "QTA-WRN-001",
     "QTA-CRI-001",
     "QTA-CRG-001",
+    "QTA-OPS-001",
     # crr (2)
     "CRR-UNU-001",
     "CRR-UNF-001",
@@ -68,13 +69,13 @@ _EXPECTED_SUBCODES_BY_CATEGORY: dict[str, set[str]] = {
         "unused-snapshot",
         "empty-resource-group",
     },
-    "quota": {"oversized", "warning", "critical-individual", "critical-groupable"},
+    "quota": {"oversized", "warning", "critical-individual", "critical-groupable", "quota-ops-hygiene"},
 }
 
 
 class TestRegistryCompleteness:
     def test_registry_has_23_entries(self) -> None:
-        assert len(REGISTRY) == 25
+        assert len(REGISTRY) == 26
 
     def test_all_spec_codes_present(self) -> None:
         actual_codes = {e.code for e in REGISTRY}
@@ -104,7 +105,7 @@ class TestRegistryCandidates:
 
     def test_22_recommendations(self) -> None:
         recs = [e for e in REGISTRY if e.finding_type is FindingType.RECOMMENDATION]
-        assert len(recs) == 24
+        assert len(recs) == 25
 
     def test_candidate_is_in_swap_category(self) -> None:
         candidate = REGISTRY_BY_CODE["SWP-ARC-001"]

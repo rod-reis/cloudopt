@@ -26,6 +26,7 @@ from cloudopt.analyzer.detectors import (
     disk_rightsize,
     disk_tier_swap,
     diskless,
+    ops_hygiene,
     quota,
     reservations,
     rightsize,
@@ -38,6 +39,7 @@ from cloudopt.enrichment.schema import EnrichedVmMetrics
 from cloudopt.models import (
     AppInsightsMetrics,
     AzureResource,
+    CapacityAlert,
     CapacityReservationGroup,
     CollectionThresholds,
     Finding,
@@ -63,6 +65,7 @@ def run_all(
     crg_items: Optional[list[CapacityReservationGroup]] = None,
     enriched_map: Optional[dict[str, EnrichedVmMetrics]] = None,
     ai_metrics_by_resource: Optional[dict[str, list[AppInsightsMetrics]]] = None,
+    capacity_alerts: Optional[list[CapacityAlert]] = None,
 ) -> list[Finding]:
     """Run every registered detector and return the combined Finding list.
 
@@ -80,6 +83,8 @@ def run_all(
         enriched_map:            Optional OS/AMA enrichment metrics by resource ID.
         ai_metrics_by_resource:  Optional Application Insights metrics keyed by
                                  App Insights resource ID; used for SLO corroboration.
+        capacity_alerts:         Optional list of Azure Monitor alert rules; used by
+                                 the QTA-OPS-001 capacity ops hygiene detector.
     """
     out: list[Finding] = []
     # Phase 3: populate memory_quality, mem_pressure_score per VM before detectors run
@@ -111,6 +116,14 @@ def run_all(
     out.extend(
         reservations.detect(
             crg_items or [],
+        )
+    )
+    # Phase 5: capacity ops hygiene — one finding per subscription
+    out.extend(
+        ops_hygiene.detect(
+            vms, metrics, quota_items, thresholds,
+            capacity_alerts=capacity_alerts,
+            crg_items=crg_items,
         )
     )
     return out
