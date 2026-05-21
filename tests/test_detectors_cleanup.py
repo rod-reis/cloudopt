@@ -1,6 +1,8 @@
 """Tests for detectors.cleanup (CLN-DSK-001, CLN-NIC-001, CLN-PIP-001, CLN-SNP-001)."""
 from __future__ import annotations
 
+import datetime
+
 from cloudopt.analyzer.detectors import cleanup
 from cloudopt.analyzer.sku_catalog import SkuCatalog
 from cloudopt.models import AzureResource, CollectionThresholds
@@ -78,3 +80,55 @@ class TestClnEmpty:
     def test_returns_empty_when_resources_is_empty_list(self):
         findings = cleanup.detect([], [], [], _T, _catalog(), resources=[])
         assert findings == []
+
+
+class TestClnDsk001ThirtyDayThreshold:
+    """CLN-DSK-001 should enforce the 30-day min age for orphaned disks."""
+
+    def _disk(self, time_created: str | None = None) -> AzureResource:
+        return AzureResource(
+            resource_id=f"/subscriptions/{SUB}/resourceGroups/rg/providers/microsoft.compute/disks/d1",
+            name="d1",
+            resource_type="microsoft.compute/disks",
+            subscription_id=SUB,
+            subscription_name="Test",
+            resource_group="rg",
+            location="eastus",
+            managed_by=None,
+            time_created=time_created,
+        )
+
+    def test_suppressed_when_disk_is_recent(self):
+        """Disk created 5 days ago should not yet be flagged as orphaned."""
+        recent = (
+            datetime.datetime.now(tz=datetime.timezone.utc) - datetime.timedelta(days=5)
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        r = self._disk(time_created=recent)
+        findings = cleanup.detect([], [], [], _T, _catalog(), resources=[r])
+        assert all(f.code != "CLN-DSK-001" for f in findings)
+
+    def test_fires_when_disk_is_old_enough(self):
+        """Disk created 45 days ago should be flagged."""
+        old = (
+            datetime.datetime.now(tz=datetime.timezone.utc) - datetime.timedelta(days=45)
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        r = self._disk(time_created=old)
+        findings = cleanup.detect([], [], [], _T, _catalog(), resources=[r])
+        assert any(f.code == "CLN-DSK-001" for f in findings)
+
+    def test_fires_with_age_note_when_time_created_missing(self):
+        """When time_created is None, finding is still emitted but with unconfirmed-age note."""
+        r = self._disk(time_created=None)
+        findings = cleanup.detect([], [], [], _T, _catalog(), resources=[r])
+        cln = [f for f in findings if f.code == "CLN-DSK-001"]
+        assert cln, "should still emit finding when creation date is unknown"
+        assert "unconfirmed" in cln[0].rationale.lower() or "unavailable" in cln[0].rationale.lower()
+
+    def test_fires_at_exactly_30_days(self):
+        """Disk created exactly 30 days ago should cross the threshold and be flagged."""
+        exactly_30 = (
+            datetime.datetime.now(tz=datetime.timezone.utc) - datetime.timedelta(days=30)
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        r = self._disk(time_created=exactly_30)
+        findings = cleanup.detect([], [], [], _T, _catalog(), resources=[r])
+        assert any(f.code == "CLN-DSK-001" for f in findings)

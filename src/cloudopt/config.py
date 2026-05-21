@@ -10,10 +10,12 @@ from cloudopt.models import CollectionThresholds
 console = Console()
 
 
-def prompt_thresholds() -> CollectionThresholds:
+def prompt_thresholds(lookback_days: int = 30) -> CollectionThresholds:
     """Interactively prompt the CSA/customer for recommendation thresholds.
 
     Each prompt shows the default value; pressing Enter accepts it.
+    ``lookback_days`` is the metric collection window; it is stored on the
+    returned thresholds so detectors can contextualise rationale text.
     """
     defaults = CollectionThresholds()
 
@@ -61,6 +63,7 @@ def prompt_thresholds() -> CollectionThresholds:
         headroom_multiplier=headroom_multiplier,
         paas_candidate_cpu_avg=paas_candidate_cpu_avg,
         quota_alert_pct=quota_alert_pct,
+        lookback_days=lookback_days,
     )
 
     console.print()

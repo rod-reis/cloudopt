@@ -82,6 +82,7 @@ def _print_pre_execution_summary(
         "Azure Virtual Machines",
         "CPU % (avg/P95/max), Available Memory Bytes,\n"
         "Disk Read/Write Bytes/sec, Disk Read/Write IOPS,\n"
+        "Temp Disk Read/Write Bytes/sec, Temp Disk Read/Write IOPS,\n"
         "Network In/Out Total Bytes",
     )
     svc_table.add_row(
@@ -502,7 +503,7 @@ def collect(
 
         # ── Thresholds (asked once, right after confirmation) ─────────────
         console.print("[bold]Configure recommendation and quota thresholds.[/bold]")
-        thresholds = prompt_thresholds()
+        thresholds = prompt_thresholds(lookback_days=eff_metric_days)
 
     # ── 3. VM Inventory ──────────────────────────────────────────────────
     console.print("[bold]Step 3:[/bold] Collecting VM inventory via Resource Graph…")
@@ -1010,7 +1011,10 @@ def analyze(
             metrics_period_days=meta_raw.get("metrics_period_days", 30),
             total_vm_count=meta_raw.get("total_vm_count", len(vms)),
             total_appinsights_count=meta_raw.get("total_appinsights_count", len(appinsights)),
-            thresholds=CollectionThresholds(**meta_raw.get("thresholds", {})),
+            thresholds=CollectionThresholds(**{
+                "lookback_days": meta_raw.get("metrics_period_days", 30),
+                **meta_raw.get("thresholds", {}),
+            }),
         )
     except Exception as exc:
         console.print(f"[yellow]Warning:[/yellow] Could not parse metadata: {exc}")

@@ -76,7 +76,8 @@ _RESOURCES_QUERY_TAIL = """
     planPub    = tostring(plan.publisher),
     planProd   = tostring(plan.product),
     zones      = tostring(iif(array_length(zones) > 0, strcat_array(zones, ','), '')),
-    managedBy
+    managedBy,
+    timeCreated = tostring(properties.timeCreated)
 | order by type asc, name asc
 """
 
@@ -159,6 +160,7 @@ def collect_resources(
                         plan_product=_str_or_none(row.get("planProd")),
                         zones=_str_or_none(row.get("zones")),
                         managed_by=_str_or_none(row.get("managedBy")),
+                        time_created=_str_or_none(row.get("timeCreated")),
                     )
                     # Apply tag filters in-memory (same pattern as VM inventory)
                     if scope is not None and scope.has_tag_filter:

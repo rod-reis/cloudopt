@@ -7,7 +7,7 @@ argument (SPEC §11.2.1 permits additional kwargs for detectors that need
 extra inputs).
 
 Implemented in Step 2:
-  CLN-DSK-001 — unattached managed disk (managed_by empty)
+  CLN-DSK-001 — unattached managed disk (managed_by empty) for ≥ 30 days
   CLN-NIC-001 — NIC with no managed_by reference (best-effort proxy)
   CLN-PIP-001 — public IP with no managed_by reference (best-effort proxy)
   CLN-SNP-001 — all snapshots flagged for review (no age data in model)
@@ -20,6 +20,8 @@ findings; for cleanup findings it holds the orphaned resource's resource_id.
 """
 
 from __future__ import annotations
+
+from datetime import datetime, timezone
 
 from cloudopt.analyzer.detectors._shared import _rec_kwargs
 from cloudopt.analyzer.sku_catalog import SkuCatalog
@@ -37,6 +39,8 @@ _DISK_TYPE = "microsoft.compute/disks"
 _NIC_TYPE = "microsoft.network/networkinterfaces"
 _PIP_TYPE = "microsoft.network/publicipaddresses"
 _SNAP_TYPE = "microsoft.compute/snapshots"
+
+_ORPHANED_DISK_MIN_DAYS = 30  # Must be unattached for at least this many days
 
 
 def detect(
@@ -77,6 +81,23 @@ def detect(
 def _check_disk(r: AzureResource) -> Finding | None:
     if r.managed_by:
         return None
+
+    days_unattached: int | None = None
+    age_note = ""
+    if r.time_created:
+        try:
+            created = datetime.fromisoformat(r.time_created.replace("Z", "+00:00"))
+            days_unattached = (datetime.now(tz=timezone.utc) - created).days
+        except (ValueError, TypeError):
+            pass
+
+    if days_unattached is not None:
+        if days_unattached < _ORPHANED_DISK_MIN_DAYS:
+            return None  # recently created — not yet orphaned
+        age_note = f" (unattached for ≥ {days_unattached} days)"
+    else:
+        age_note = " (creation date unavailable — age unconfirmed)"
+
     return Finding(
         vm_id=r.resource_id,
         category=Category.CLEANUP,
@@ -86,7 +107,7 @@ def _check_disk(r: AzureResource) -> Finding | None:
         proposed=None,
         rationale=(
             f"Managed disk '{r.name}' in resource group '{r.resource_group}' "
-            "has no managed_by reference — it is not attached to any VM. "
+            f"has no managed_by reference — it is not attached to any VM{age_note}. "
             "Review and delete to reduce storage costs."
         ),
         **_rec_kwargs(category=Category.CLEANUP),

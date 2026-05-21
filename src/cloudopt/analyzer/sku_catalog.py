@@ -17,6 +17,8 @@ from azure.mgmt.compute import ComputeManagementClient
 class SkuSpec:
     vcpus: int
     memory_gb: float
+    network_bandwidth_mbps: float = 0.0   # MaxNetworkBandwidth capability (Mbps); 0 = unknown
+    accelerated_networking: bool = False  # AcceleratedNetworkingEnabled capability
 
 
 class SkuCatalog:
@@ -55,6 +57,8 @@ class SkuCatalog:
 
             vcpus: int = 0
             memory_gb: float = 0.0
+            network_bandwidth_mbps: float = 0.0
+            accelerated_networking: bool = False
 
             for cap in sku.capabilities or []:
                 if cap.name == "vCPUsAvailable":
@@ -67,11 +71,21 @@ class SkuCatalog:
                         memory_gb = float(cap.value or 0)
                     except ValueError:
                         pass
+                elif cap.name == "MaxNetworkBandwidth":
+                    try:
+                        network_bandwidth_mbps = float(cap.value or 0)
+                    except ValueError:
+                        pass
+                elif cap.name == "AcceleratedNetworkingEnabled":
+                    accelerated_networking = (cap.value or "").lower() == "true"
 
             if sku.name and (vcpus or memory_gb):
                 key = (subscription_id, (sku.locations or [region])[0].lower())
                 self._cache[key][sku.name] = SkuSpec(
-                    vcpus=vcpus, memory_gb=memory_gb
+                    vcpus=vcpus,
+                    memory_gb=memory_gb,
+                    network_bandwidth_mbps=network_bandwidth_mbps,
+                    accelerated_networking=accelerated_networking,
                 )
 
     def find_smaller_sku(

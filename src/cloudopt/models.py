@@ -61,6 +61,15 @@ class CollectionThresholds(BaseModel):
         default=1.2,
         description="Buffer multiplier applied to P95 utilization when selecting a right-sized SKU",
     )
+    lookback_days: int = Field(
+        default=30,
+        description=(
+            "Number of days of metrics history analyzed. "
+            "Passed through from --metrics-days at collection time. "
+            "Used by rightsize and SKU-swap detectors to contextualise rationale text "
+            "and by idle detection to compute the last-3-day P100 window."
+        ),
+    )
     paas_candidate_cpu_avg: float = Field(
         default=10.0,
         description="Average CPU % below which a low-disk-IO VM is flagged as a PaaS migration candidate",
@@ -535,6 +544,7 @@ class AzureResource(BaseModel):
     plan_product: Optional[str] = None
     zones: Optional[str] = None            # comma-separated zone list
     managed_by: Optional[str] = None
+    time_created: Optional[str] = None     # ISO 8601 from properties.timeCreated (ARG)
 
     def masked_resource_id(self) -> str:
         return mask_subscription_ids_in_string(self.resource_id)

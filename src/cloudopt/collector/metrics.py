@@ -17,7 +17,12 @@ Tradeoffs vs. agent-based sources
 * Works on every VM regardless of OS type or agent installation state.
 
 Metrics collected: CPU %, Available Memory Bytes, Disk R/W Bytes/sec,
-Disk R/W IOPS, Network In/Out Total Bytes.
+Disk R/W IOPS, Temp Disk R/W Bytes/sec, Temp Disk R/W IOPS,
+Network In/Out Total Bytes.
+
+Sampling interval: PT1H (hourly).  For a 7-day window this yields 168 data
+points per metric — sufficient for accurate P95/P99/max statistics.  For the
+maximum 90-day window, 2 160 hourly points are produced.
 
 Checkpoints every 500 VMs to allow resuming interrupted runs.
 """
@@ -58,14 +63,22 @@ _CHECKPOINT_INTERVAL = 500
 # 400 BadRequest, which silently drops the metric. See:
 # https://learn.microsoft.com/azure/azure-monitor/essentials/metrics-supported#microsoftcomputevirtualmachines
 _METRICS: list[tuple[str, str, str]] = [
-    ("Percentage CPU",            "cpu_pct",             "Average,Minimum,Maximum"),
-    ("Available Memory Bytes",    "available_memory_bytes", "Average,Minimum,Maximum"),
-    ("Disk Read Bytes",            "disk_read_bps",       "Average"),
-    ("Disk Write Bytes",           "disk_write_bps",      "Average"),
-    ("Disk Read Operations/Sec",  "disk_read_iops",      "Average"),
-    ("Disk Write Operations/Sec", "disk_write_iops",     "Average"),
-    ("Network In Total",          "network_in_bytes",    "Total,Average,Minimum,Maximum"),
-    ("Network Out Total",         "network_out_bytes",   "Total,Average,Minimum,Maximum"),
+    ("Percentage CPU",                  "cpu_pct",                  "Average,Minimum,Maximum"),
+    ("Available Memory Bytes",          "available_memory_bytes",   "Average,Minimum,Maximum"),
+    ("Disk Read Bytes",                 "disk_read_bps",            "Average"),
+    ("Disk Write Bytes",                "disk_write_bps",           "Average"),
+    ("Disk Read Operations/Sec",        "disk_read_iops",           "Average"),
+    ("Disk Write Operations/Sec",       "disk_write_iops",          "Average"),
+    # Temp-disk metrics — needed for diskless SKU eligibility (SWP-DSK-001).
+    # These return null for VMs running diskless SKUs or when the temp disk
+    # has had no IO activity; absence is treated as zero by the diskless
+    # detector, which requires active telemetry before recommending.
+    ("Temp Disk Read Bytes/sec",        "temp_disk_read_bps",       "Average"),
+    ("Temp Disk Write Bytes/sec",       "temp_disk_write_bps",      "Average"),
+    ("Temp Disk Read Operations/Sec",   "temp_disk_read_iops",      "Average"),
+    ("Temp Disk Write Operations/Sec",  "temp_disk_write_iops",     "Average"),
+    ("Network In Total",                "network_in_bytes",         "Total,Average,Minimum,Maximum"),
+    ("Network Out Total",               "network_out_bytes",        "Total,Average,Minimum,Maximum"),
 ]
 
 
@@ -201,7 +214,7 @@ async def _fetch_metric(
             return await client.metrics.list(
                 resource_uri=resource_id,
                 timespan=timespan,
-                interval="P1D",
+                interval="PT1H",
                 metricnames=metric_name,
                 aggregation=aggregation,
             )
@@ -232,7 +245,7 @@ async def _fetch_metric(
             if val is None:
                 val = point.total
             if val is not None:
-                date_str = point.time_stamp.strftime("%Y-%m-%d") if point.time_stamp else ""
+                date_str = point.time_stamp.strftime("%Y-%m-%dT%H:00:00Z") if point.time_stamp else ""
                 time_series_data.append(DailyDataPoint(date=date_str, value=val))
                 raw_values.append(val)
             # Capture actual peak values from the API response

@@ -6,8 +6,6 @@ outputs.  The deprecated shims in ``recommendations.py`` delegate here.
 SPEC §11.2 ambiguities / deferral notes
 ---------------------------------------
 * SWP-GEN-001: no existing logic to port; deferred to a future step.
-* DCM-IDL-001: requires metric-based idle detection not present in Step 1
-  logic; deferred to a future step.
 * CLN-RGP-001: requires a complete resource-group list not available in the
   current AzureResource model; deferred.
 * QUOTA_REVIEW tier (old util ≤ 25%): removed from taxonomy; the shim's
@@ -21,7 +19,16 @@ from __future__ import annotations
 
 from typing import Optional
 
-from cloudopt.analyzer.detectors import cleanup, decom, quota, reservations, rightsize, swap
+from cloudopt.analyzer.detectors import (
+    burstable,
+    cleanup,
+    decom,
+    diskless,
+    quota,
+    reservations,
+    rightsize,
+    swap,
+)
 from cloudopt.analyzer.sku_catalog import SkuCatalog
 from cloudopt.enrichment.schema import EnrichedVmMetrics
 from cloudopt.models import (
@@ -60,10 +67,12 @@ def run_all(
         resources:      Optional orphaned-resource list for cleanup detectors.
         enable_dlc:     Enable DCM-DLC-001 (lower-env oversized) detector.
         enable_env_check: Enable DCM-ENV-001 (missing env-tag) detector.
-        crg_items:      Optional Capacity Reservation Groups (\u00a72.6 detectors).
+        crg_items:      Optional Capacity Reservation Groups (§2.6 detectors).
     """
     out: list[Finding] = []
     out.extend(rightsize.detect(vms, metrics, quota_items, thresholds, catalog, enriched_map=enriched_map))
+    out.extend(burstable.detect(vms, metrics, quota_items, thresholds, catalog, enriched_map=enriched_map))
+    out.extend(diskless.detect(vms, metrics, quota_items, thresholds, catalog, enriched_map=enriched_map))
     out.extend(swap.detect(vms, metrics, quota_items, thresholds, catalog, enriched_map=enriched_map))
     out.extend(
         decom.detect(

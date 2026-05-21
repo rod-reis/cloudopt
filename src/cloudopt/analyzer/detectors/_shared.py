@@ -318,3 +318,165 @@ def _suggest_family_swap(
     if cpu_pct >= _CPU_BOUND_CPU_PCT and mem_pct < _CPU_BOUND_MEM_PCT:
         return ("F", "compute-bound")
     return None
+
+
+# ---------------------------------------------------------------------------
+# Network utilization helpers
+# ---------------------------------------------------------------------------
+
+# Bytes per Mbit (1 Mbit = 125 000 bytes)
+_BYTES_PER_MBIT = 125_000.0
+
+
+def _network_util_pct(
+    network_out_avg_bytes: Optional[float],
+    bandwidth_mbps: float,
+    interval_seconds: float = 3600.0,
+) -> Optional[float]:
+    """Return outbound network utilization as a percentage of SKU bandwidth.
+
+    ``network_out_avg_bytes`` is the Azure Monitor "Network Out Total" **average**
+    (bytes per interval).  ``bandwidth_mbps`` is the SKU's max outbound bandwidth
+    in Mbps from the SKU catalog.  ``interval_seconds`` must match the collection
+    interval (3600 for PT1H, 86400 for P1D).
+
+    Returns None when either input is unavailable or bandwidth is zero.
+    """
+    if network_out_avg_bytes is None or bandwidth_mbps <= 0:
+        return None
+    capacity_bytes_per_interval = bandwidth_mbps * _BYTES_PER_MBIT * interval_seconds
+    if capacity_bytes_per_interval <= 0:
+        return None
+    return min(100.0, (network_out_avg_bytes / capacity_bytes_per_interval) * 100.0)
+
+
+# ---------------------------------------------------------------------------
+# Time-series windowing helpers
+# ---------------------------------------------------------------------------
+
+import statistics as _statistics
+
+
+def _ts_values(vm_met: dict[str, VmMetrics], metric_name: str) -> list[float]:
+    """Return all time-series point values for a metric, or empty list."""
+    m = vm_met.get(metric_name)
+    if m is None:
+        return []
+    return [pt.value for pt in m.time_series]
+
+
+def _ts_p100_last_n_days(
+    vm_met: dict[str, VmMetrics],
+    metric_name: str,
+    n_days: int,
+) -> Optional[float]:
+    """Return the maximum (P100) of the last ``n_days`` of hourly values.
+
+    Time-series points are sorted by their ISO timestamp string; the last
+    ``n_days * 24`` entries correspond to the most recent window.
+    """
+    m = vm_met.get(metric_name)
+    if m is None or not m.time_series:
+        return None
+    pts = sorted(m.time_series, key=lambda p: p.date)
+    window = pts[-(n_days * 24):]
+    if not window:
+        return None
+    return max(pt.value for pt in window)
+
+
+def _ts_std(vm_met: dict[str, VmMetrics], metric_name: str) -> Optional[float]:
+    """Return the population standard deviation of all time-series values."""
+    vals = _ts_values(vm_met, metric_name)
+    if len(vals) < 2:
+        return None
+    return _statistics.pstdev(vals)
+
+
+# ---------------------------------------------------------------------------
+# User-facing workload classification
+# ---------------------------------------------------------------------------
+
+# CloudFit uses a Microsoft Research method based on sub-minute CPU patterns.
+# With hourly data we approximate via the coefficient of variation (CV = σ/μ).
+# A high CV relative to the mean indicates a bursty / user-facing profile.
+_USER_FACING_CV_THRESHOLD = 0.5   # CV >= 0.5 AND p95 > 2×avg → classify as user-facing
+_USER_FACING_P95_RATIO = 2.0      # p95 must be at least 2× the mean to confirm burstiness
+
+
+def _is_user_facing(
+    vm_met: dict[str, VmMetrics],
+) -> bool:
+    """Return True when the CPU utilisation pattern suggests a user-facing workload.
+
+    Heuristic: high coefficient of variation in hourly CPU AND P95 >> average.
+    This approximates (with lower resolution) the Microsoft Research method used
+    by CloudFit which operates on 30-minute samples.
+    """
+    vals = _ts_values(vm_met, "Percentage CPU")
+    if len(vals) < 4:
+        return False  # insufficient data — default to non-user-facing (conservative)
+    mean = sum(vals) / len(vals)
+    if mean <= 0:
+        return False
+    std = _statistics.pstdev(vals)
+    cv = std / mean
+    sorted_vals = sorted(vals)
+    p95 = _percentile(sorted_vals, 95)
+    return cv >= _USER_FACING_CV_THRESHOLD and p95 >= mean * _USER_FACING_P95_RATIO
+
+
+def _percentile(sorted_values: list[float], pct: int) -> float:
+    """Return the p-th percentile of a sorted list (linear interpolation)."""
+    if not sorted_values:
+        return 0.0
+    idx = (pct / 100) * (len(sorted_values) - 1)
+    lo = int(idx)
+    hi = min(lo + 1, len(sorted_values) - 1)
+    frac = idx - lo
+    return sorted_values[lo] * (1 - frac) + sorted_values[hi] * frac
+
+
+# ---------------------------------------------------------------------------
+# B-series burstable baseline table
+# ---------------------------------------------------------------------------
+
+# Baseline CPU % for B-series SKUs: the fraction of a vCPU's capacity that
+# the VM can use sustainably before drawing from accumulated credits.
+# Source: https://learn.microsoft.com/azure/virtual-machines/bsv2-series
+# Keyed by vCPU count; covers the common B-series variants.
+_BSERIES_BASELINE_PCT: dict[int, float] = {
+    1:  10.0,   # B1s, B1ls, B1ms
+    2:  40.0,   # B2s, B2ms, B2als_v2, B2as_v2
+    4:  40.0,   # B4ms, B4als_v2, B4as_v2
+    8:  40.0,   # B8ms, B8als_v2, B8as_v2
+    16: 40.0,   # B16ms, B16als_v2, B16as_v2
+    20: 40.0,   # B20ms
+    32: 40.0,   # B32als_v2, B32as_v2
+}
+
+_BSERIES_RE = re.compile(r"^Standard_B\d", re.IGNORECASE)
+
+
+def _is_bseries_sku(sku: str) -> bool:
+    return bool(_BSERIES_RE.match(sku))
+
+
+def _bseries_baseline_pct(vcpus: int) -> float:
+    """Return the burstable baseline CPU % for a given vCPU count."""
+    return _BSERIES_BASELINE_PCT.get(vcpus, 40.0)
+
+
+def _bseries_credits_sufficient(
+    cpu_avg_pct: float,
+    vcpus: int,
+    lookback_days: int,
+) -> bool:
+    """Return True when B-series CPU credits are sufficient over the lookback window.
+
+    Credits accrue at (baseline_pct - avg_pct) * vcpus per hour when below
+    baseline, and deplete when above.  If the long-run average is below baseline,
+    credits are net-positive and the workload is sustainable on B-series.
+    """
+    baseline = _bseries_baseline_pct(vcpus)
+    return cpu_avg_pct < baseline
