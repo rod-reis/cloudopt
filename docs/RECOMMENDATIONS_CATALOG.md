@@ -2,6 +2,7 @@
 
 > **Audience:** Delivery teams, FastTrack engineers, account leads using CloudOpt outputs with customers.
 > **Purpose:** Reference for every recommendation CloudOpt emits -- what it detects, the rules it applies, the data it needs, and how much trust to place in it.
+> **Product framing:** CloudOpt is a **Cloud Efficiency** tool focused on **Performance**, **Capacity**, and **Resiliency**. Every recommendation below is framed around fit, headroom, and posture -- not savings. Cost is a tiebreaker among performance-equivalent options, never the goal.
 
 ---
 
@@ -62,13 +63,16 @@ CloudOpt scores every recommendation with one of three tiers. The rules are dete
 | **User-facing classification** | Bursty workloads (CV of hourly CPU >= 0.5 AND P95 >= 2x avg) use the tighter **P95 <= 40%** target on the new SKU. Steady workloads use the relaxed **P95 <= 80%**. |
 | **VMSS instance-count rule** | For VMSS groups, CloudOpt **prioritizes reducing instance count** over a SKU change (`ceil(total_cpu * headroom / target_pct)`). Only recommends if at least 1 instance can be removed. |
 | **Headroom** | Default `1.2x` multiplier on observed values when projecting onto the proposed SKU. |
-| **Proposed SKU rules** | Same family/generation, strictly cheaper, supports same Accelerated Networking and Premium Storage capability, available in the VM's region. |
+| **Proposed SKU rules** | Same family/generation, smallest SKU that preserves the performance headroom targets above, supports same Accelerated Networking and Premium Storage capability, available in the VM's region. (Cost is a tiebreaker among performance-equivalent candidates, not the selector.) |
 | **Confidence** | MEDIUM (platform) -> HIGH (with os-agent or workload-aware enrichment) |
 
-#### `RSZ-UPS-001` -- Right-size up (more CPU/RAM, same family) -- *registry only, no detector yet*
+#### `RSZ-UPS-001` -- Right-size up (more vCPU / memory, same family) -- *registry only, no detector yet*
 | | |
 |---|---|
-| **Status** | Reserved in the taxonomy; detector deferred. |
+| **Status** | Reserved in the taxonomy; detector deferred pending OS-agent / APM enrichment input. |
+| **Why it matters** | Protects **performance** and **resiliency** when a workload is sustained-saturated on its current SKU. First-class concern -- not a deprioritized inverse of `RSZ-DWN-001`. |
+| **Why deferred** | A trustworthy upsize call requires confirmation of real saturation across CPU, memory, and queue / latency / IO wait. Azure Monitor's host-level `Available Memory Bytes` is too noisy on its own; the detector waits on guest-OS or APM enrichment (Datadog / Splunk / Dynatrace / New Relic / VM Insights / Prometheus). |
+| **Planned trigger (when shipped)** | `os.cpu.percent` P95 >= 85% **and** `os.memory.used_percent` P95 >= 85% sustained over the lookback window, with the recommendation **gated to HIGH only** (suppressed entirely if enrichment data is absent). |
 
 #### `RSZ-BSF-001` -- Burstable fit (D/E/F -> B-series)
 | | |
@@ -272,11 +276,14 @@ Both CRR findings are **LOW** confidence -- snapshot collection cannot verify th
 
 ## 6. How to talk about these with customers
 
-1. **Lead with HIGH-confidence cleanup and quota recommendations.** They are sourced directly from Azure APIs and don't depend on monitoring quality.
-2. **For rightsize and swap recommendations, set expectations.** If the customer hasn't supplied an OS-agent or workload-aware CSV, every `RSZ-*` and `SWP-FAM-001` finding will be **MEDIUM** with an explicit blocker message. This is by design -- Azure's host-level `Available Memory Bytes` proxy is unreliable.
-3. **Burstable and diskless are net-new vs. Azure Advisor's defaults.** Highlight `RSZ-BSF-001` and `SWP-DSK-001` as additional savings opportunities customers might miss.
-4. **CRR findings are LOW by design.** They are a starting point for the FinOps team to validate against billing data -- CloudOpt cannot verify the 30-day duration from a single snapshot.
+CloudOpt is a **Cloud Efficiency** tool. Frame findings around **performance fit, capacity posture, and resiliency**, not savings.
+
+1. **Lead with HIGH-confidence cleanup and quota recommendations.** They are sourced directly from Azure APIs and don't depend on monitoring quality. Cleanup matters because orphans distort capacity planning and operational hygiene; quota matters because exhausted quota blocks deployments and scale events.
+2. **For rightsize and swap recommendations, set expectations.** If the customer hasn't supplied an OS-agent or workload-aware CSV, every `RSZ-*` and `SWP-FAM-001` finding will be **MEDIUM** with an explicit blocker message. This is by design -- Azure's host-level `Available Memory Bytes` proxy is unreliable for performance-fit decisions.
+3. **Burstable and diskless surface efficiency gains Azure Advisor's defaults often miss.** `RSZ-BSF-001` matches workloads to a credit model that better fits their performance profile; `SWP-DSK-001` removes a local-disk dependency that isn't being used. Both are about **fit**, not about being cheaper.
+4. **CRR findings are LOW by design.** They are a starting point for the capacity-planning conversation -- CloudOpt cannot verify the 30-day duration from a single snapshot, so use them to drive investigation, not action.
 5. **Discovery-only candidates** (`SWP-ARC-001`) should be framed as "worth investigating" -- never as a prescribed action.
+6. **Right-size up is a first-class concern.** When `RSZ-UPS-001` ships, it will be framed as protecting performance and resiliency under sustained pressure -- not as the opposite of right-size down.
 
 ---
 

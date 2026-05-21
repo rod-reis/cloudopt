@@ -1,9 +1,14 @@
 # cloudopt
 
-**cloudopt** is a read-only Python CLI that collects Azure Virtual Machine inventory and
+**cloudopt** is a Cloud Efficiency tool focused on **Performance, Capacity, and Resiliency**.
+It is a read-only Python CLI that collects Azure Virtual Machine inventory and
 performance metrics across one or many subscriptions, producing a structured JSON artifact.
 A separate `analyze` step transforms that JSON into an Excel workbook and launches a local
 web dashboard — without requiring any Azure access on the analyst's machine.
+
+> CloudOpt is **not** a cost-optimization or FinOps tool. Recommendations are framed
+> around performance fit, capacity headroom, and resiliency posture. Cost reduction
+> can be a consequence, never the goal.
 
 > **Cloud Shell compatible** — `cloudopt collect` has no Excel dependency and runs in
 > Azure Cloud Shell or any Python 3.11+ environment.  Customer data stays local and is

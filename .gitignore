@@ -119,7 +119,6 @@ docs/prompts/*
 .aider*
 .continue/
 .copilot/
-.github/copilot-instructions.md
 *.swp
 *.swo
 
