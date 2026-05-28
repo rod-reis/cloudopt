@@ -47,7 +47,7 @@ _DATA: dict[str, Any] = {
 # ---------------------------------------------------------------------------
 
 def _build_waterfall(vms, findings):
-    """Return vCPU waterfall data for the Capacity Recovery chart."""
+    """Return vCPU forecast data for the Right-sized Capacity chart."""
     from cloudopt.analyzer.taxonomy import Readiness, Category
     total_running_vcpu = sum(v.vcpus for v in vms if not _is_stopped(v))
     vms_by_id = {v.resource_id: v for v in vms}

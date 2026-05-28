@@ -340,7 +340,7 @@ def _make_rsz_finding(
                 and mem_delta_gb < thresholds.material_change_min_mem_delta_gb
             ):
                 return None
-            # Store deltas so dashboard can compute capacity recovery
+            # Store deltas so dashboard can compute the right-sized capacity forecast
             # Sign convention: negative = capacity freed by this action (downsize = negative)
             vcpu_reduction = proposed_spec.vcpus - current_spec.vcpus  # negative for downsize
             mem_reduction_gb = proposed_spec.memory_gb - current_spec.memory_gb

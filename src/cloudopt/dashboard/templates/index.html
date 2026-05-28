@@ -729,7 +729,7 @@
             <div class="kpi-card purple">
               <div class="kpi-label">vCPU Opportunity</div>
               <div class="kpi-value" id="kpi-vcpu-opp">&#x2014;</div>
-              <div class="kpi-sub">Reclaimable cores</div>
+              <div class="kpi-sub">Available to right-size</div>
             </div>
             <div class="kpi-card red">
               <div class="kpi-label">Modernization Gaps</div>
@@ -740,7 +740,7 @@
           <!-- Row 2: Charts -->
           <div class="chart-row wide">
             <div class="chart-card">
-              <h3>Capacity Recovery Waterfall</h3>
+              <h3>Right-sized Capacity Forecast</h3>
               <canvas id="chart-waterfall"></canvas>
             </div>
             <div class="chart-card">
@@ -1794,12 +1794,12 @@
         if (chartWaterfall) chartWaterfall.destroy();
         var d = waterfallData;
         if (!d || !d.current_vcpu) {
-          ctx.parentElement.innerHTML += '<p style="color:var(--muted);font-size:13px;margin-top:8px;">No capacity recovery data available.</p>';
+          ctx.parentElement.innerHTML += '<p style="color:var(--muted);font-size:13px;margin-top:8px;">No right-sizing forecast data available.</p>';
           return;
         }
         var afterDownsize = d.current_vcpu - (d.downsize_recovery || 0);
         var afterDecom    = afterDownsize - (d.decom_recovery || 0);
-        var labels = ["Current Total", "After Downsizes", "After Decommission", "Target Remaining"];
+        var labels = ["Today", "After Right-sizing", "After Removing Idle", "Right-sized Footprint"];
         var vals   = [d.current_vcpu, afterDownsize, afterDecom, d.remaining || afterDecom];
         var colors = ["#3182ce", "#38a169", "#38a169", "#718096"];
         chartWaterfall = new Chart(ctx.getContext("2d"), {

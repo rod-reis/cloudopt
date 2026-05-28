@@ -28,7 +28,7 @@ The `Executive Summary` sheet is the **first sheet** in every workbook produced 
 | READY Actions | Findings with `readiness = READY` (HIGH confidence, act now) |
 | READY % | READY findings ÷ total recommendations |
 | Avg Confidence Score | Mean numeric confidence score across all recommendations (0–100) |
-| vCPU Opportunity | vCPUs recoverable from READY downsize + decom findings |
+| vCPU Opportunity | vCPUs available to right-size from READY downsize + idle-removal findings |
 | Generation Gap Count | VMs running ≥2 generations behind the current SKU in their family |
 
 ### Section 2 — Top 10 Quick Wins
@@ -133,7 +133,7 @@ The redesigned Summary Dashboard (`cloudopt dashboard → Summary`) shows:
 |---|---|
 | KPI cards | Total VMs, READY %, Avg Confidence Score, vCPU Opportunity, Generation Gap Count |
 | Confidence Score Distribution | Histogram of all findings by score bucket (0–10, 10–20, …, 90–100); green ≥80, amber 50–79, red <50 |
-| Capacity Recovery Waterfall | Horizontal bar: Current vCPU → After Downsizes → After Decom → Remaining |
+| Right-sized Capacity Forecast | Bar chart: Today → After Right-sizing → After Removing Idle → Right-sized Footprint (in vCPU) |
 | Top READY Decisions | Top 10 quick-win findings with score badges and one-line rationale |
 | Capacity Ops Monitoring | Per-subscription pill scorecard for QTA-OPS-001 sub-checks |
 
