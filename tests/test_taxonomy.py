@@ -35,6 +35,7 @@ _EXPECTED_CODES: set[str] = {
     "SWP-FAM-001",
     "SWP-LFC-001",
     "SWP-DST-001",
+    "SWP-DST-002",
     "SWP-ARC-001",
     # decom (4)
     "DCM-IDL-001",
@@ -75,7 +76,7 @@ _EXPECTED_SUBCODES_BY_CATEGORY: dict[str, set[str]] = {
 
 class TestRegistryCompleteness:
     def test_registry_has_23_entries(self) -> None:
-        assert len(REGISTRY) == 26
+        assert len(REGISTRY) == 27
 
     def test_all_spec_codes_present(self) -> None:
         actual_codes = {e.code for e in REGISTRY}
@@ -105,7 +106,7 @@ class TestRegistryCandidates:
 
     def test_22_recommendations(self) -> None:
         recs = [e for e in REGISTRY if e.finding_type is FindingType.RECOMMENDATION]
-        assert len(recs) == 25
+        assert len(recs) == 26
 
     def test_candidate_is_in_swap_category(self) -> None:
         candidate = REGISTRY_BY_CODE["SWP-ARC-001"]

@@ -207,6 +207,69 @@ class TestJsonExport:
         assert "underutilized_cpu_avg" in thresholds
 
 
+class TestDiskJsonRoundTrip:
+    def _disk(self):
+        from cloudopt.models import DiskInventory
+
+        sub = "a1b2c3d4-ef56-7890-abcd-ef1234567890"
+        vm = f"/subscriptions/{sub}/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm1"
+        return DiskInventory(
+            resource_id=f"/subscriptions/{sub}/resourceGroups/rg/providers/Microsoft.Compute/disks/d1",
+            disk_name="d1",
+            subscription_id=sub,
+            subscription_name="Prod",
+            resource_group="rg",
+            location="eastus",
+            sku_name="Premium_LRS",
+            performance_tier="P30",
+            disk_size_gb=1024,
+            disk_iops_read_write=5000,
+            disk_mbps_read_write=200,
+            disk_state="Attached",
+            managed_by=vm,
+            raw_properties={"tier": "P30"},
+        )
+
+    def test_disks_written_and_masked(self, tmp_path):
+        path = tmp_path / "output.json"
+        write_json([], [], [], _make_metadata(), path, disks=[self._disk()])
+        data = json.loads(path.read_text())
+        assert "disks" in data
+        assert len(data["disks"]) == 1
+        text = path.read_text()
+        assert "a1b2c3d4-ef56-7890-abcd-ef1234567890" not in text
+        assert "a1b2c3d4-xxxx" in text
+        # raw_properties is intentionally NOT serialized to JSON
+        assert "raw_properties" not in data["disks"][0]
+
+    def test_disk_reloads_and_detector_fires(self, tmp_path):
+        from cloudopt.analyzer.detectors import disk_pv2
+        from cloudopt.models import DiskInventory
+
+        path = tmp_path / "output.json"
+        write_json([], [], [], _make_metadata(), path, disks=[self._disk()])
+        data = json.loads(path.read_text())
+        reloaded = [DiskInventory(**d) for d in data["disks"]]
+        assert reloaded[0].is_premium_v1 and reloaded[0].is_data_disk
+        findings = disk_pv2.detect(reloaded)
+        assert [f.code for f in findings] == ["SWP-DST-002"]
+
+    def test_disk_excel_sheet_round_trip(self, tmp_path):
+        from cloudopt.export.excel import read_disks_from_workbook
+
+        path = tmp_path / "output.xlsx"
+        write_workbook([], [], [], _make_metadata(), path, disks=[self._disk()])
+        import openpyxl
+
+        wb = openpyxl.load_workbook(path, read_only=True)
+        assert "Disk Inventory" in wb.sheetnames
+        wb.close()
+        disks = read_disks_from_workbook(path)
+        assert len(disks) == 1
+        assert disks[0].disk_name == "d1"
+        assert disks[0].sku_name == "Premium_LRS"
+
+
 # ---------------------------------------------------------------------------
 # CSV export
 # ---------------------------------------------------------------------------

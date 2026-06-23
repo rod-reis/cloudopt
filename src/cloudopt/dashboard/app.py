@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from cloudopt.export.excel import read_workbook, read_quota_from_workbook, read_vmss_groups_from_workbook
 from cloudopt.models import (
     CollectionMetadata,
+    DiskInventory,
     VmInventory,
     VmMetrics,
     VmRecommendation,
@@ -38,6 +39,7 @@ _DATA: dict[str, Any] = {
     "findings": [],
     "source_coverage": [],
     "vmss_groups": [],
+    "disks": [],
     "findings_status": {},
 }
 
@@ -364,6 +366,31 @@ def create_app(data_path: Path) -> FastAPI:
     async def source_coverage_view():
         return _DATA["source_coverage"]
 
+    @app.get("/api/disks")
+    async def disks_view(
+        subscription: str | None = Query(None),
+        resource_group: str | None = Query(None),
+        sku: str | None = Query(None),
+        pv2_only: bool = Query(False),
+        search: str | None = Query(None),
+    ):
+        items: list[DiskInventory] = _DATA["disks"]
+        if subscription:
+            items = [d for d in items if d.subscription_name == subscription]
+        if resource_group:
+            items = [d for d in items if d.resource_group == resource_group]
+        if sku:
+            items = [d for d in items if (d.sku_name or "") == sku]
+        if pv2_only:
+            items = [d for d in items if d.is_premium_v1 and d.is_data_disk and d.managed_by]
+        if search:
+            q = search.lower()
+            items = [
+                d for d in items
+                if q in d.disk_name.lower() or q in d.resource_group.lower()
+            ]
+        return [_disk_json(d) for d in items]
+
     @app.get("/api/summary/waterfall")
     async def summary_waterfall():
         return _build_waterfall(_DATA["vms"], _DATA["findings"])
@@ -499,6 +526,8 @@ def _load_excel(path: Path) -> None:
     _DATA["findings"] = findings
     _load_findings_status(path)
     _DATA["vmss_groups"] = read_vmss_groups_from_workbook(path)
+    from cloudopt.export.excel import read_disks_from_workbook
+    _DATA["disks"] = read_disks_from_workbook(path)
 
 
 def _load_json(path: Path) -> None:
@@ -563,6 +592,16 @@ def _load_json(path: Path) -> None:
         except Exception:
             pass
     _DATA["deployment_failures"] = depfail
+
+    # --- Disk inventory (microsoft.compute/disks) ---
+    from cloudopt.models import DiskInventory
+    disks: list[DiskInventory] = []
+    for d in raw.get("disks", []):
+        try:
+            disks.append(DiskInventory(**d))
+        except Exception:
+            pass
+    _DATA["disks"] = disks
 
     # --- Capacity Alerts (QTA-OPS-001) ---
     from cloudopt.models import CapacityAlert, CapacityAlertType
@@ -706,6 +745,29 @@ def _finding_json(f: Any) -> dict:
         "blockers_to_high": f.blockers_to_high,
         "customer_inputs_needed": f.customer_inputs_needed,
         "rationale": f.rationale,
+    }
+
+
+def _disk_json(d: DiskInventory) -> dict:
+    return {
+        "resource_id": d.masked_resource_id(),
+        "disk_name": d.disk_name,
+        "subscription_name": d.subscription_name,
+        "resource_group": d.resource_group,
+        "location": d.location,
+        "sku_name": d.sku_name,
+        "performance_tier": d.performance_tier,
+        "disk_size_gb": d.disk_size_gb,
+        "disk_iops_read_write": d.disk_iops_read_write,
+        "disk_mbps_read_write": d.disk_mbps_read_write,
+        "bursting_enabled": d.bursting_enabled,
+        "disk_state": d.disk_state,
+        "os_type": d.os_type,
+        "zones": d.zones,
+        "encryption_type": d.encryption_type,
+        "managed_by": d.masked_managed_by(),
+        "time_created": d.time_created,
+        "pv2_candidate": bool(d.is_premium_v1 and d.is_data_disk and d.managed_by),
     }
 
 

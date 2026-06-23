@@ -351,6 +351,7 @@ def collect(
     from cloudopt.collector.metrics import collect_metrics
     from cloudopt.collector.quota import collect_quota, sub_regions_from_vms
     from cloudopt.collector.resources import collect_resources, collect_empty_resource_groups
+    from cloudopt.collector.disks import collect_disks
     from cloudopt.collector.zones import collect_zone_mappings
     from cloudopt.collector.appinsights import (
         collect_appinsights_inventory,
@@ -658,6 +659,15 @@ def collect(
     )
     _debug_time(debug, "Step 7d-ii: Empty resource groups", _t)
 
+    # ── 7d-iii. Managed disk inventory via Resource Graph ────────────────
+    console.print("[bold]Step 7d-iii:[/bold] Collecting managed disk inventory via Resource Graph…")
+    _t = time.perf_counter()
+    all_disks = collect_disks(credential=credential, subscriptions=target_subs, scope=scope)
+    console.print(
+        f"[green]✓[/green] {len(all_disks)} managed disk(s) discovered.\n"
+    )
+    _debug_time(debug, "Step 7d-iii: Disk inventory", _t)
+
     # ── 7e. Stop history for deallocated / stopped VMs ───────────────────
     from cloudopt.collector.stop_history import collect_stop_history
 
@@ -826,6 +836,7 @@ def collect(
         workload_info=workload_info,
         zone_mappings=zone_maps,
         resources=all_resources,
+        disks=all_disks,
         capacity_alerts=capacity_alerts,
         vmss_groups=vmss_uniform_groups,
         empty_resource_groups=empty_rgs,
@@ -1032,6 +1043,15 @@ def analyze(
         except Exception:
             pass
 
+    # --- Disk inventory ---------------------------------------------------
+    from cloudopt.models import DiskInventory as _DiskInventory
+    disks_from_json: list[_DiskInventory] = []
+    for d in raw.get("disks", []):
+        try:
+            disks_from_json.append(_DiskInventory(**d))
+        except Exception:
+            pass
+
     # --- Capacity Reservation Groups --------------------------------------
     crg_from_json: list[CapacityReservationGroup] = []
     for d in raw.get("capacity_reservations", []):
@@ -1166,6 +1186,7 @@ def analyze(
             catalog=catalog,
             resources=resources_from_json,
             empty_resource_groups=empty_rgs_from_json,
+            disks=disks_from_json,
             crg_items=crg_from_json,
             enriched_map=enriched_map or None,
             capacity_alerts=capacity_alerts_from_json or None,
@@ -1205,6 +1226,7 @@ def analyze(
         zone_mappings=zone_mappings,
         enriched_metrics=enriched_metrics,
         resources=resources_from_json,
+        disks=disks_from_json,
         capacity_reservations=crg_from_json,
         deployment_failures=dep_failures_from_json,
         managed_groups=managed_groups,

@@ -640,6 +640,9 @@
         <div class="nav-item" data-section="s-inventory" onclick="nav(this)">
           <span class="nav-icon">&#x1F5A5;&#xFE0F;</span>VM Inventory
         </div>
+        <div class="nav-item" data-section="s-disks" onclick="nav(this)">
+          <span class="nav-icon">&#x1F4BD;</span>Disk Inventory
+        </div>
         <div class="nav-item" data-section="s-sku" onclick="nav(this)">
           <span class="nav-icon">&#x1F4D0;</span>SKU Analysis
         </div>
@@ -1183,6 +1186,62 @@
           </div>
         </div>
 
+        <!-- DISK INVENTORY -->
+        <div id="s-disks" class="section">
+          <div class="filters">
+            <select id="disk-sub" onchange="renderDisks()">
+              <option value="">All Subscriptions</option>
+            </select>
+            <select id="disk-rg" onchange="renderDisks()">
+              <option value="">All Resource Groups</option>
+            </select>
+            <select id="disk-sku" onchange="renderDisks()">
+              <option value="">All Disk SKUs</option>
+            </select>
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px">
+              <input id="disk-pv2" type="checkbox" onchange="renderDisks()" />
+              Pv1&#x2192;Pv2 candidates only
+            </label>
+            <input
+              id="disk-search"
+              type="text"
+              placeholder="Search disk / RG&#x2026;"
+              oninput="renderDisks()"
+              style="min-width: 180px"
+            />
+          </div>
+          <div class="table-card">
+            <div class="table-header">
+              <h3>Managed Disk Inventory</h3>
+              <span
+                id="disk-count"
+                style="font-size: 12px; color: var(--muted)"
+              ></span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Disk Name</th>
+                    <th>Pv2?</th>
+                    <th>SKU</th>
+                    <th>Perf Tier</th>
+                    <th>Size (GiB)</th>
+                    <th>Prov. IOPS</th>
+                    <th>Prov. MBps</th>
+                    <th>State</th>
+                    <th>OS Type</th>
+                    <th>Zones</th>
+                    <th>Resource Group</th>
+                    <th>Subscription</th>
+                  </tr>
+                </thead>
+                <tbody id="disk-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
         <!-- PERF BY VM -->
         <div id="s-perfvm" class="section">
           <div class="filters">
@@ -1378,6 +1437,7 @@
       var meta = {};
       var perVmData = [],
         vmInsightsData = [];
+      var diskData = [];
       var chartCategory, chartConfidence, chartSubs, chartSku;
       var PAGE_SIZE = 500,
         invPage = 0;
@@ -1489,6 +1549,7 @@
         "s-groups": "VM Groups",
         "s-perfvm": "Perf by VM",
         "s-inventory": "VM Inventory",
+        "s-disks": "Disk Inventory",
         "s-sku": "SKU Analysis",
         "s-quota": "Quota Utilization",
         "s-insights": "VM Insights",
@@ -1621,6 +1682,9 @@
           fetch("/api/findings-status")
             .then(function (r) { return r.json(); })
             .catch(function () { return {}; }),
+          fetch("/api/disks")
+            .then(function (r) { return r.json(); })
+            .catch(function () { return []; }),
         ]);
         overview = results[0];
         subData = results[1];
@@ -1640,6 +1704,7 @@
         hygieneData = results[15] || [];
         quickWinsData = results[16] || [];
         findingsStatus = results[17] || {};
+        diskData = results[18] || [];
         renderAll();
       }
 
@@ -1668,6 +1733,8 @@
         populateInsFilters();
         renderVmInsights();
         renderArchetypes();
+        populateDiskFilters();
+        renderDisks();
         renderActionPlan("all");
         initAllSortable();
       }
@@ -2388,7 +2455,139 @@
         tbody("inv-body", rows);
       }
 
-      // ── SKU Analysis ───────────────────────────────────
+      // ── Disk Inventory ─────────────────────────────────
+      function populateDiskFilters() {
+        function fillSel(id, vals) {
+          var sel = document.getElementById(id);
+          if (!sel) return;
+          var cur = sel.value;
+          var base = sel.options[0].outerHTML;
+          var uniq = [...new Set(vals)].filter(Boolean).sort();
+          sel.innerHTML =
+            base +
+            uniq
+              .map(function (v) {
+                return '<option value="' + esc(v) + '">' + esc(v) + "</option>";
+              })
+              .join("");
+          if (cur) sel.value = cur;
+        }
+        fillSel(
+          "disk-sub",
+          diskData.map(function (d) {
+            return d.subscription_name;
+          }),
+        );
+        fillSel(
+          "disk-rg",
+          diskData.map(function (d) {
+            return d.resource_group;
+          }),
+        );
+        fillSel(
+          "disk-sku",
+          diskData.map(function (d) {
+            return d.sku_name;
+          }),
+        );
+      }
+      function renderDisks() {
+        var sub = document.getElementById("disk-sub").value;
+        var rg = document.getElementById("disk-rg").value;
+        var sku = document.getElementById("disk-sku").value;
+        var pv2 = document.getElementById("disk-pv2").checked;
+        var q = (
+          document.getElementById("disk-search").value || ""
+        ).toLowerCase();
+        var items = diskData;
+        if (sub)
+          items = items.filter(function (d) {
+            return d.subscription_name === sub;
+          });
+        if (rg)
+          items = items.filter(function (d) {
+            return d.resource_group === rg;
+          });
+        if (sku)
+          items = items.filter(function (d) {
+            return d.sku_name === sku;
+          });
+        if (pv2)
+          items = items.filter(function (d) {
+            return d.pv2_candidate;
+          });
+        if (q)
+          items = items.filter(function (d) {
+            return (
+              (d.disk_name || "").toLowerCase().indexOf(q) >= 0 ||
+              (d.resource_group || "").toLowerCase().indexOf(q) >= 0 ||
+              (d.sku_name || "").toLowerCase().indexOf(q) >= 0
+            );
+          });
+        var cnt = document.getElementById("disk-count");
+        if (cnt) {
+          var cand = diskData.filter(function (d) {
+            return d.pv2_candidate;
+          }).length;
+          cnt.textContent =
+            items.length + " disks \u00B7 " + cand + " Pv1\u2192Pv2 candidate(s)";
+        }
+        var rows = items
+          .map(function (d) {
+            var pv2Badge = d.pv2_candidate
+              ? '<span class="pill" style="background:#FFF4E5;color:#8a5a00">Pv2 candidate</span>'
+              : "\u2014";
+            var rowStyle = d.pv2_candidate
+              ? ' style="background:rgba(255,244,229,.5)"'
+              : "";
+            return (
+              "<tr" +
+              rowStyle +
+              "><td><strong>" +
+              esc(d.disk_name) +
+              "</strong></td>" +
+              "<td>" +
+              pv2Badge +
+              "</td>" +
+              "<td><code>" +
+              esc(d.sku_name || "\u2014") +
+              "</code></td>" +
+              "<td>" +
+              esc(d.performance_tier || "\u2014") +
+              "</td>" +
+              '<td style="text-align:right">' +
+              (d.disk_size_gb != null ? d.disk_size_gb : "\u2014") +
+              "</td>" +
+              '<td style="text-align:right">' +
+              (d.disk_iops_read_write != null
+                ? d.disk_iops_read_write
+                : "\u2014") +
+              "</td>" +
+              '<td style="text-align:right">' +
+              (d.disk_mbps_read_write != null
+                ? d.disk_mbps_read_write
+                : "\u2014") +
+              "</td>" +
+              "<td>" +
+              esc(d.disk_state || "\u2014") +
+              "</td>" +
+              "<td>" +
+              esc(d.os_type || "Data") +
+              "</td>" +
+              "<td>" +
+              esc((d.zones || []).join(", ") || "\u2014") +
+              "</td>" +
+              "<td>" +
+              esc(d.resource_group || "\u2014") +
+              "</td>" +
+              "<td>" +
+              esc(d.subscription_name || "\u2014") +
+              "</td></tr>"
+            );
+          })
+          .join("");
+        tbody("disk-body", rows);
+      }
       function renderSku() {
         var rows = skuData
           .map(function (s) {
@@ -2949,6 +3148,7 @@
         "s-groups",
         "s-perfvm",
         "s-inventory",
+        "s-disks",
         "s-sku",
         "s-quota",
         "s-insights",

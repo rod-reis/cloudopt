@@ -57,6 +57,7 @@ from cloudopt.models import (
     CollectionMetadata,
     CollectionThresholds,
     DeploymentFailureEntry,
+    DiskInventory,
     Finding,
     ManagedComputeGroupRow,
     ParentServiceType,
@@ -121,6 +122,7 @@ def write_workbook(
     capacity_reservations: list[CapacityReservationGroup] | None = None,
     deployment_failures: list[DeploymentFailureEntry] | None = None,
     resources: list[AzureResource] | None = None,
+    disks: list[DiskInventory] | None = None,
     workload_info: WorkloadInfo | None = None,
     managed_groups: list[ManagedComputeGroupRow] | None = None,
     app_insights: list[Any] | None = None,
@@ -219,6 +221,8 @@ def write_workbook(
         sheet_managed_service(wb, svc_type, svc_groups)
     # Sheet 20 — Resource Inventory
     _sheet_resources(wb, resources or [])
+    # Sheet 20b — Disk Inventory
+    _sheet_disk_inventory(wb, disks or [])
     # Sheet 21 — Capacity Reservations
     _sheet_capacity_reservations(wb, capacity_reservations or [])
     # Sheet 22 — Deployment Failures
@@ -331,9 +335,64 @@ def read_vmss_groups_from_workbook(path: Path) -> list[ManagedComputeGroupRow]:
     return results
 
 
-# ---------------------------------------------------------------------------
-# Sheet 1: Technical Summary  (Phase B)
-# ---------------------------------------------------------------------------
+def read_disks_from_workbook(path: Path) -> list[DiskInventory]:
+    """Read the 'Disk Inventory' sheet from an existing workbook."""
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    if "Disk Inventory" not in wb.sheetnames:
+        return []
+    ws = wb["Disk Inventory"]
+
+    col_map: dict[str, int] = {}
+    for cell in next(ws.iter_rows(min_row=1, max_row=1)):
+        if cell.value:
+            col_map[str(cell.value)] = cell.column - 1
+
+    def _get(row_vals: list, header: str):
+        idx = col_map.get(header)
+        return row_vals[idx] if idx is not None and idx < len(row_vals) else None
+
+    def _int(v) -> int | None:
+        try:
+            return int(v) if v not in (None, "") else None
+        except (TypeError, ValueError):
+            return None
+
+    def _str(v) -> str | None:
+        s = str(v).strip() if v is not None else ""
+        return s or None
+
+    results: list[DiskInventory] = []
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        row_vals = list(row)
+        name = _get(row_vals, "Disk Name")
+        if not name:
+            continue
+        try:
+            results.append(DiskInventory(
+                resource_id=str(_get(row_vals, "Resource ID") or name),
+                disk_name=str(name),
+                subscription_id="",
+                subscription_name=str(_get(row_vals, "Subscription") or ""),
+                resource_group=str(_get(row_vals, "Resource Group") or ""),
+                location=str(_get(row_vals, "Region") or ""),
+                sku_name=_str(_get(row_vals, "SKU Name")),
+                performance_tier=_str(_get(row_vals, "Perf Tier")),
+                disk_size_gb=_int(_get(row_vals, "Size (GiB)")),
+                disk_iops_read_write=_int(_get(row_vals, "Prov. IOPS")),
+                disk_mbps_read_write=_int(_get(row_vals, "Prov. MBps")),
+                disk_state=_str(_get(row_vals, "State")),
+                os_type=_str(_get(row_vals, "OS Type")),
+                zones=_str(_get(row_vals, "Zones")),
+                managed_by=_str(_get(row_vals, "Managed By")),
+                encryption_type=_str(_get(row_vals, "Encryption")),
+                network_access_policy=_str(_get(row_vals, "Network Access")),
+                disk_controller_types=_str(_get(row_vals, "Disk Controller")),
+                hyper_v_generation=_str(_get(row_vals, "Hyper-V Gen")),
+                time_created=_str(_get(row_vals, "Created")),
+            ))
+        except Exception:
+            pass
+    return results
 
 _READINESS_FILL_MAP: dict[str, Any] = {
     "READY": _READY_FILL,
@@ -2164,6 +2223,88 @@ def _sheet_resources(wb: Workbook, resources: list[AzureResource]) -> None:
 
     if resources:
         _add_table(ws, "TblInventory_ARG", len(resources))
+
+
+# ---------------------------------------------------------------------------
+# Sheet 20b: Disk Inventory (ARG microsoft.compute/disks)
+# ---------------------------------------------------------------------------
+
+_DISK_COLS: list[tuple[str, str, int]] = [
+    # (header, field_name_or_special, width)
+    ("Disk Name", "disk_name", 36),
+    ("Pv2 Candidate", "pv2_candidate", 14),
+    ("SKU Name", "sku_name", 18),
+    ("Perf Tier", "performance_tier", 12),
+    ("Size (GiB)", "disk_size_gb", 12),
+    ("Prov. IOPS", "disk_iops_read_write", 12),
+    ("Prov. MBps", "disk_mbps_read_write", 12),
+    ("Bursting", "bursting_enabled", 10),
+    ("State", "disk_state", 14),
+    ("OS Type", "os_type", 12),
+    ("Zones", "zones", 10),
+    ("Resource Group", "resource_group", 26),
+    ("Subscription", "subscription_name", 28),
+    ("Subscription ID", "masked_subscription_id", 42),
+    ("Region", "location", 16),
+    ("Encryption", "encryption_type", 26),
+    ("Network Access", "network_access_policy", 20),
+    ("Disk Controller", "disk_controller_types", 16),
+    ("Hyper-V Gen", "hyper_v_generation", 12),
+    ("Created", "time_created", 22),
+    ("Managed By", "masked_managed_by", 50),
+    ("Resource ID", "masked_resource_id", 80),
+]
+
+
+def _disk_cell_value(disk: DiskInventory, field: str) -> Any:
+    if field == "masked_resource_id":
+        return disk.masked_resource_id()
+    if field == "masked_subscription_id":
+        return disk.masked_subscription_id()
+    if field == "masked_managed_by":
+        return disk.masked_managed_by() or ""
+    if field == "pv2_candidate":
+        # Attached Premium SSD v1 data disk → SWP-DST-002 candidate.
+        if disk.is_premium_v1 and disk.is_data_disk and disk.managed_by:
+            return "Yes"
+        return ""
+    if field == "bursting_enabled":
+        if disk.bursting_enabled is None:
+            return ""
+        return "Yes" if disk.bursting_enabled else "No"
+    val = getattr(disk, field, None)
+    return "" if val is None else val
+
+
+def _sheet_disk_inventory(wb: Workbook, disks: list[DiskInventory]) -> None:
+    ws = wb.create_sheet("Disk Inventory")
+    headers = [c[0] for c in _DISK_COLS]
+    _write_header(ws, headers)
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}1"
+
+    # Pv2-candidate rows get a subtle highlight so they stand out for review.
+    pv2_fill = PatternFill("solid", fgColor="FFF4E5")
+
+    for row_idx, disk in enumerate(disks, start=2):
+        alt = row_idx % 2 == 0
+        is_candidate = disk.is_premium_v1 and disk.is_data_disk and bool(disk.managed_by)
+        for col_idx, (_, field, _) in enumerate(_DISK_COLS, start=1):
+            val = _disk_cell_value(disk, field)
+            cell = ws.cell(row=row_idx, column=col_idx, value=val)
+            cell.border = _THIN_BORDER
+            cell.font = Font(size=9)
+            cell.alignment = Alignment(vertical="top", wrap_text=False)
+            if is_candidate:
+                cell.fill = pv2_fill
+            elif alt:
+                cell.fill = _ALT_FILL
+
+    for col_idx, (_, _, width) in enumerate(_DISK_COLS, start=1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+    if disks:
+        _add_table(ws, "TblDiskInventory", len(disks))
 
 
 # Sheet 12: Collection Metadata

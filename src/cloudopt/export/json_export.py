@@ -14,6 +14,7 @@ from cloudopt.models import (
     CapacityAlert,
     CapacityReservationGroup,
     CollectionMetadata,
+    DiskInventory,
     ManagedComputeGroupRow,
     QuotaItem,
     ResourceGroupInfo,
@@ -43,6 +44,7 @@ def write_json(
     enriched_metrics: list[EnrichedVmMetrics] | None = None,
     enrichment_summary: EnrichmentSummary | None = None,
     resources: list[AzureResource] | None = None,
+    disks: list[DiskInventory] | None = None,
     capacity_reservations: list[CapacityReservationGroup] | None = None,
     capacity_alerts: list[CapacityAlert] | None = None,
     vmss_groups: list[ManagedComputeGroupRow] | None = None,
@@ -61,6 +63,7 @@ def write_json(
         "appinsights_metrics": [_ai_metrics_dict(m) for m in (appinsights_metrics or [])],
         "zone_mappings": [_zone_mapping_dict(z) for z in (zone_mappings or [])],
         "resources": [_resource_dict(r) for r in (resources or [])],
+        "disks": [_disk_dict(d) for d in (disks or [])],
         "capacity_reservations": [_crg_dict(c) for c in (capacity_reservations or [])],
         "capacity_alerts": [_alert_dict(a) for a in (capacity_alerts or [])],
         "vmss_groups": [g.model_dump() for g in (vmss_groups or [])],
@@ -214,6 +217,39 @@ def _resource_dict(r: AzureResource) -> dict:
         "plan_product": r.plan_product,
         "zones": r.zones,
         "managed_by": r.managed_by,
+    }
+
+
+def _disk_dict(d: DiskInventory) -> dict:
+    return {
+        "resource_id": d.masked_resource_id(),
+        "disk_name": d.disk_name,
+        "subscription_id": d.masked_subscription_id(),
+        "subscription_name": d.subscription_name,
+        "resource_group": d.resource_group,
+        "location": d.location,
+        "sku_name": d.sku_name,
+        "sku_tier": d.sku_tier,
+        "performance_tier": d.performance_tier,
+        "disk_size_gb": d.disk_size_gb,
+        "disk_iops_read_write": d.disk_iops_read_write,
+        "disk_mbps_read_write": d.disk_mbps_read_write,
+        "disk_iops_read_only": d.disk_iops_read_only,
+        "disk_mbps_read_only": d.disk_mbps_read_only,
+        "bursting_enabled": d.bursting_enabled,
+        "disk_state": d.disk_state,
+        "os_type": d.os_type,
+        "managed_by": d.masked_managed_by(),
+        "managed_by_extended": [
+            mask_subscription_ids_in_string(m) for m in d.managed_by_extended
+        ],
+        "zones": d.zones,
+        "encryption_type": d.encryption_type,
+        "network_access_policy": d.network_access_policy,
+        "public_network_access": d.public_network_access,
+        "disk_controller_types": d.disk_controller_types,
+        "hyper_v_generation": d.hyper_v_generation,
+        "time_created": d.time_created,
     }
 
 

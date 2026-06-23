@@ -644,6 +644,77 @@ class AzureResource(BaseModel):
         return mask_subscription_id(self.subscription_id)
 
 
+class DiskInventory(BaseModel):
+    """One managed disk from the ARG ``microsoft.compute/disks`` table.
+
+    Every field exposed by Resource Graph is promoted to a first-class
+    column where useful for efficiency analysis; the full ``properties``
+    payload is retained verbatim in ``raw_properties`` so consumers can
+    reach any field we do not promote.  Workload Owner tag values are
+    intentionally NOT carried here.
+    """
+
+    # Core identifiers — stored internally as full values; masked at export
+    resource_id: str
+    disk_name: str
+    subscription_id: str
+    subscription_name: str
+    resource_group: str
+    location: str
+
+    # SKU / performance class
+    sku_name: Optional[str] = None          # e.g. Premium_LRS (Pv1), PremiumV2_LRS (Pv2)
+    sku_tier: Optional[str] = None          # e.g. Premium
+    performance_tier: Optional[str] = None  # properties.tier, e.g. P30
+
+    # Capacity & provisioned performance
+    disk_size_gb: Optional[int] = None          # properties.diskSizeGB
+    disk_iops_read_write: Optional[int] = None  # properties.diskIOPSReadWrite
+    disk_mbps_read_write: Optional[int] = None  # properties.diskMBpsReadWrite
+    disk_iops_read_only: Optional[int] = None   # properties.diskIOPSReadOnly
+    disk_mbps_read_only: Optional[int] = None   # properties.diskMBpsReadOnly
+    bursting_enabled: Optional[bool] = None     # properties.burstingEnabled
+
+    # State & attachment
+    disk_state: Optional[str] = None        # properties.diskState, e.g. Attached/Unattached
+    os_type: Optional[str] = None           # properties.osType — None for data disks
+    managed_by: Optional[str] = None        # owning VM resource ID (single attach)
+    managed_by_extended: list[str] = Field(default_factory=list)  # shared-disk attachers
+    zones: Optional[str] = None             # comma-separated zone list
+
+    # Platform & security characteristics
+    encryption_type: Optional[str] = None       # properties.encryption.type
+    network_access_policy: Optional[str] = None  # properties.networkAccessPolicy
+    public_network_access: Optional[str] = None  # properties.publicNetworkAccess
+    disk_controller_types: Optional[str] = None  # supportedCapabilities.diskControllerTypes
+    hyper_v_generation: Optional[str] = None     # properties.hyperVGeneration
+    time_created: Optional[str] = None           # properties.timeCreated (ISO 8601)
+
+    # Full ``properties`` payload as returned by ARG, stored verbatim.
+    raw_properties: dict = Field(default_factory=dict)
+
+    def masked_resource_id(self) -> str:
+        return mask_subscription_ids_in_string(self.resource_id)
+
+    def masked_subscription_id(self) -> str:
+        return mask_subscription_id(self.subscription_id)
+
+    def masked_managed_by(self) -> Optional[str]:
+        if self.managed_by is None:
+            return None
+        return mask_subscription_ids_in_string(self.managed_by)
+
+    @property
+    def is_premium_v1(self) -> bool:
+        """True when this is a Premium SSD v1 (``Premium_LRS``) disk."""
+        return (self.sku_name or "").strip().lower() == "premium_lrs"
+
+    @property
+    def is_data_disk(self) -> bool:
+        """True for data disks (``osType`` unset). Pv2 cannot back an OS disk."""
+        return not (self.os_type or "").strip()
+
+
 class ResourceGroupInfo(BaseModel):
     """Lightweight descriptor for an Azure Resource Group.
 

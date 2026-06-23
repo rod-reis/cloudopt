@@ -23,6 +23,7 @@ from cloudopt.analyzer.detectors import (
     burstable,
     cleanup,
     decom,
+    disk_pv2,
     disk_rightsize,
     disk_tier_swap,
     diskless,
@@ -42,6 +43,7 @@ from cloudopt.models import (
     CapacityAlert,
     CapacityReservationGroup,
     CollectionThresholds,
+    DiskInventory,
     Finding,
     QuotaItem,
     ResourceGroupInfo,
@@ -59,6 +61,7 @@ def run_all(
     *,
     resources: Optional[list[AzureResource]] = None,
     empty_resource_groups: Optional[list[ResourceGroupInfo]] = None,
+    disks: Optional[list[DiskInventory]] = None,
     enable_dlc: bool = False,
     enable_env_check: bool = False,
     rsvp_orders: Optional[list] = None,  # unused, kept for backward compat
@@ -76,6 +79,8 @@ def run_all(
         thresholds:              Detection thresholds (see CollectionThresholds).
         catalog:                 SKU catalog used for right-size candidate lookup.
         resources:               Optional orphaned-resource list for cleanup detectors.
+        disks:                   Optional managed-disk inventory (ARG); drives the
+                                 SWP-DST-002 Premium SSD v1 → v2 modernization detector.
         empty_resource_groups:   Optional empty resource groups (CLN-RGP-001).
         enable_dlc:              Enable DCM-DLC-001 (lower-env oversized) detector.
         enable_env_check:        Enable DCM-ENV-001 (missing env-tag) detector.
@@ -98,6 +103,7 @@ def run_all(
     out.extend(upsize.detect(vms, metrics, quota_items, thresholds, catalog, enriched_map=enriched_map))
     out.extend(disk_rightsize.detect(vms, metrics, quota_items, thresholds, catalog, enriched_map=enriched_map))
     out.extend(disk_tier_swap.detect(vms, metrics, quota_items, thresholds, catalog, enriched_map=enriched_map))
+    out.extend(disk_pv2.detect(disks))
     out.extend(
         decom.detect(
             vms, metrics, quota_items, thresholds, catalog,

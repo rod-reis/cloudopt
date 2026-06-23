@@ -218,8 +218,20 @@ REGISTRY: tuple[RegistryEntry, ...] = (
         subcategory=SubCategory.DISK_TIER,
         finding_type=FindingType.RECOMMENDATION,
         description=(
-            "Premium SSD → Standard SSD, or v1 → v2 disks, when usage"
-            " does not justify the current tier."
+            "Premium SSD → Standard SSD when sustained disk demand does not"
+            " justify the current performance class."
+        ),
+    ),
+    RegistryEntry(
+        code="SWP-DST-002",
+        category=Category.SWAP,
+        subcategory=SubCategory.DISK_TIER,
+        finding_type=FindingType.RECOMMENDATION,
+        description=(
+            "Premium SSD v1 (Premium_LRS) → Premium SSD v2 (PremiumV2_LRS)"
+            " data disk: decouples IOPS/throughput from the capacity P-tier,"
+            " releasing stranded capacity provisioned only to reach a"
+            " performance target."
         ),
     ),
     RegistryEntry(
